@@ -1,0 +1,1 @@
+web: npm run db:migrate:deploy && npm run db:seed && npm start

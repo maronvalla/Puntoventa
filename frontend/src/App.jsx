@@ -1,50 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { initializeApp } from "firebase/app";
-import {
-  getFirestore,
-  collection,
-  addDoc,
-  doc,
-  updateDoc,
-  onSnapshot,
-  query,
-  orderBy,
-  serverTimestamp,
-  where,
-  runTransaction,
-} from "firebase/firestore";
-import {
-  getAuth,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut,
-} from "firebase/auth";
-import { getFunctions } from "firebase/functions";
-
-/**
- * ✅ Firebase config (edet-be4ec)
- * IMPORTANTE: mantenelo igual al snippet oficial
- */
-const firebaseConfig = {
-  apiKey: "AIzaSyBgwHTAGWlWGUJAV0zLxsa48Zw-xVkjaI8",
-  authDomain: "edet-be4ec.firebaseapp.com",
-  databaseURL: "https://edet-be4ec-default-rtdb.firebaseio.com",
-  projectId: "edet-be4ec",
-  storageBucket: "edet-be4ec.firebasestorage.app",
-  messagingSenderId: "811388526827",
-  appId: "1:811388526827:web:53e8683650699fb2fcdeae",
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-// Si en el futuro usás functions (Blaze), poné región explícita
-getFunctions(app, "us-central1");
-
-/**
- * ✅ App data namespace
- */
-const appId = "pos-pagofacil";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import api from "./services/api.js";
 
 /**
  * Helpers
@@ -64,9 +19,9 @@ function money(n) {
   return x.toLocaleString("es-AR", { maximumFractionDigits: 0 });
 }
 
-function timeFromTimestamp(ts) {
-  if (!ts || typeof ts.toDate !== "function") return "-";
-  const d = ts.toDate();
+function formatTime(dateString) {
+  if (!dateString) return "-";
+  const d = new Date(dateString);
   return new Intl.DateTimeFormat("es-AR", {
     timeZone: "America/Argentina/Tucuman",
     hour: "2-digit",
@@ -76,22 +31,19 @@ function timeFromTimestamp(ts) {
 
 export default function App() {
   // Auth
-  const [fbUser, setFbUser] = useState(null);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   // Data
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
-  const [profiles, setProfiles] = useState([]); // users/{uid}
+  const [profiles, setProfiles] = useState([]);
 
-  // Role from Firestore profile
-  const myProfile = useMemo(
-    () => profiles.find((p) => p.uid === fbUser?.uid),
-    [profiles, fbUser]
-  );
-  const isAdmin = myProfile?.role === "admin";
+  // Role
+  const isAdmin = user?.role === "ADMIN";
 
   // UI
-  const [view, setView] = useState("pos"); // pos | inventory | reports | users | purchases | sales
+  const [view, setView] = useState("pos");
   const [cart, setCart] = useState([]);
 
   // Login gate
@@ -111,7 +63,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
 
   // Payment
-  const [paymentMethod, setPaymentMethod] = useState("cash"); // cash | transfer | mixed
+  const [paymentMethod, setPaymentMethod] = useState("cash");
   const [cashAmount, setCashAmount] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
   const [isProcessingSale, setIsProcessingSale] = useState(false);
@@ -125,7 +77,7 @@ export default function App() {
     stock: "",
     code: "",
   });
-  const [stockAdjust, setStockAdjust] = useState({}); // { [productId]: { delta, reason } }
+  const [stockAdjust, setStockAdjust] = useState({});
 
   // Purchases (admin)
   const todayKey = dayKeyTucuman(new Date());
@@ -143,45 +95,73 @@ export default function App() {
   const [saleDetail, setSaleDetail] = useState(null);
   const [saleEdit, setSaleEdit] = useState(null);
 
-  // 1) Auth listener
+  // New user form (admin)
+  const [newUser, setNewUser] = useState({ username: "", password: "", name: "" });
+
+  // Check auth on mount
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setFbUser(u || null));
-    return () => unsub();
+    async function checkAuth() {
+      if (api.getToken()) {
+        try {
+          const { user } = await api.getMe();
+          setUser(user);
+        } catch (e) {
+          api.setToken(null);
+        }
+      }
+      setAuthLoading(false);
+    }
+    checkAuth();
   }, []);
 
-  // 2) Firestore listeners
+  // Load data when authenticated
+  const loadData = useCallback(async () => {
+    if (!user) return;
+    try {
+      const [productsData, usersData] = await Promise.all([
+        api.getProducts(),
+        api.getUsers(),
+      ]);
+      setProducts(productsData);
+      setProfiles(usersData);
+    } catch (e) {
+      console.error("Error loading data:", e);
+    }
+  }, [user]);
+
   useEffect(() => {
-    if (!fbUser) return;
+    loadData();
+  }, [loadData]);
 
-    const productsRef = collection(db, "artifacts", appId, "public", "data", "products");
-    const salesRef = collection(db, "artifacts", appId, "public", "data", "sales");
-    const usersRef = collection(db, "artifacts", appId, "public", "data", "users");
+  // Load sales when day or filter changes
+  const loadSales = useCallback(async () => {
+    if (!user) return;
+    try {
+      const salesData = await api.getSales({
+        dayKey: selectedDayKey,
+        sellerId: isAdmin && salesFilterUser !== "all" ? salesFilterUser : undefined,
+      });
+      setSales(salesData);
+    } catch (e) {
+      console.error("Error loading sales:", e);
+    }
+  }, [user, selectedDayKey, salesFilterUser, isAdmin]);
 
-    const unsubP = onSnapshot(query(productsRef, orderBy("createdAt", "desc")), (snap) => {
-      setProducts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+  useEffect(() => {
+    loadSales();
+  }, [loadSales]);
 
-    // Cajero: solo sus ventas; Admin: todas
-    const salesQ = isAdmin
-      ? query(salesRef, orderBy("createdAt", "desc"))
-      : query(salesRef, where("sellerUid", "==", fbUser.uid));
+  // Polling for real-time updates (every 5 seconds)
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(() => {
+      loadData();
+      loadSales();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [user, loadData, loadSales]);
 
-    const unsubS = onSnapshot(salesQ, (snap) => {
-      setSales(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
-
-    const unsubU = onSnapshot(query(usersRef, orderBy("name", "asc")), (snap) => {
-      setProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
-
-    return () => {
-      unsubP();
-      unsubS();
-      unsubU();
-    };
-  }, [fbUser, isAdmin]);
-
-  // Autofocus buscador cuando entro a POS
+  // Autofocus search when entering POS
   useEffect(() => {
     if (view === "pos") {
       setTimeout(() => searchRef.current?.focus(), 150);
@@ -193,28 +173,23 @@ export default function App() {
     if (view !== "pos") return;
 
     function handleKeyDown(e) {
-      // Ignore if we're in an input/textarea/select
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
 
-      // Only numbers
       if (/^[0-9]$/.test(e.key)) {
         setQuickCodeBuffer((prev) => prev + e.key);
       }
 
-      // Enter to process
       if (e.key === "Enter" && quickCodeBuffer) {
         e.preventDefault();
         handleQuickSale(quickCodeBuffer);
         setQuickCodeBuffer("");
       }
 
-      // Escape to clear buffer
       if (e.key === "Escape") {
         setQuickCodeBuffer("");
       }
 
-      // Backspace to delete last digit
       if (e.key === "Backspace") {
         e.preventDefault();
         setQuickCodeBuffer((prev) => prev.slice(0, -1));
@@ -225,12 +200,12 @@ export default function App() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [view, quickCodeBuffer, products, isProcessingSale]);
 
-  // Cart total (robusto)
+  // Cart total
   const cartTotal = useMemo(() => {
     return cart.reduce((sum, it) => sum + Number(it.price || 0) * Number(it.qty || 0), 0);
   }, [cart]);
 
-  // Ajustar montos cuando cambia método (cash/transfer)
+  // Update amounts when payment method changes
   useEffect(() => {
     if (paymentMethod === "cash") {
       setCashAmount(String(cartTotal || 0));
@@ -238,7 +213,7 @@ export default function App() {
     } else if (paymentMethod === "transfer") {
       setCashAmount("0");
       setTransferAmount(String(cartTotal || 0));
-    } // mixed: el usuario decide
+    }
   }, [paymentMethod, cartTotal]);
 
   function applyMixedAmount(value, total, setPrimary, setSecondary) {
@@ -268,24 +243,24 @@ export default function App() {
       return;
     }
 
-    const email = username.includes("@")
-      ? username.toLowerCase()
-      : `${username.toLowerCase()}@pos.local`;
-
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const { user: userData } = await api.login(username, password);
+      setUser(userData);
       setLogin({ username: "", password: "" });
       setLoginErr("");
       setView("pos");
     } catch (e) {
-      setLoginErr("Usuario o contraseña incorrectos.");
-      console.error("LOGIN ERROR:", e?.code, e?.message);
+      setLoginErr(e.message || "Usuario o contraseña incorrectos.");
     }
   }
 
   async function logout() {
-    await signOut(auth);
+    await api.logout();
+    setUser(null);
     setCart([]);
+    setProducts([]);
+    setSales([]);
+    setProfiles([]);
     setView("pos");
   }
 
@@ -327,117 +302,31 @@ export default function App() {
     addToCart(product);
   }
 
-  // Quick sale by short code (2-3 digits)
+  // Quick sale by short code
   async function handleQuickSale(code) {
     const c = String(code || "").trim();
     if (!c || isProcessingSale) return;
 
-    // Find product by exact code (case-insensitive)
-    const product = products.find(
-      (p) => String(p.code || "").toLowerCase() === c.toLowerCase()
-    );
-
-    if (!product) {
-      alert("Código no encontrado: " + c);
-      return;
-    }
-
-    // Create temporary cart with 1 unit
-    const tempCart = [{
-      id: product.id,
-      name: product.name,
-      price: Number(product.price || 0),
-      costPrice: Number(product.costPrice || 0),
-      barcode: product.barcode || "",
-      code: product.code || "",
-      qty: 1,
-    }];
-
-    // Process direct sale with cash
-    await processQuickSale(tempCart);
-  }
-
-  async function processQuickSale(items) {
-    if (isProcessingSale || !items.length) return;
     setIsProcessingSale(true);
-
-    const sellerName = myProfile?.name || fbUser.email;
-    const dayKey = dayKeyTucuman(new Date());
-
-    const saleItems = items.map((i) => ({
-      productId: i.id,
-      name: i.name,
-      qty: Number(i.qty),
-      unitPrice: Number(i.price),
-      itemCostPrice: Number(i.costPrice || 0),
-      barcode: i.barcode || null,
-      code: i.code || null,
-      lineTotal: Number(i.price) * Number(i.qty),
-    }));
-    const total = saleItems.reduce((a, it) => a + it.lineTotal, 0);
-
-    const salesRef = collection(db, "artifacts", appId, "public", "data", "sales");
-    const saleKey = `${fbUser.uid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const saleDoc = doc(salesRef, saleKey);
-
     try {
-      await runTransaction(db, async (tx) => {
-        // Read product docs
-        const reads = [];
-        for (const item of saleItems) {
-          const productRef = doc(db, "artifacts", appId, "public", "data", "products", item.productId);
-          const snap = await tx.get(productRef);
-          if (!snap.exists()) throw new Error(`Producto no encontrado: ${item.name}`);
-          reads.push({ item, productRef, data: snap.data() });
-        }
-
-        // Update stock
-        for (const r of reads) {
-          const currentStock = Number(r.data.stock || 0);
-          tx.update(r.productRef, { stock: currentStock - r.item.qty });
-        }
-
-        // Create sale
-        tx.set(saleDoc, {
-          sellerUid: fbUser.uid,
-          sellerName,
-          dayKey,
-          items: saleItems,
-          total,
-          paymentMethod: "cash",
-          cashAmount: total,
-          transferAmount: 0,
-          status: "active",
-          createdAt: serverTimestamp(),
-        });
-      });
-
-      alert(`Venta rápida: ${items[0].name} - $${money(total)}`);
+      const result = await api.quickSale(c);
+      alert(`Venta rápida: ${result.productName} - $${money(result.total)}`);
+      loadData();
+      loadSales();
     } catch (e) {
-      alert(e?.message || "Error en venta rápida");
+      alert(e.message || "Error en venta rápida");
     } finally {
       setIsProcessingSale(false);
     }
   }
 
-  // ✅ Venta (stock puede quedar negativo) + read-before-write + idempotencia básica
+  // Process sale
   async function processSale() {
-    if (isProcessingSale) return;
-    if (!cart.length) return;
+    if (isProcessingSale || !cart.length) return;
 
-    // validar pago mixto
-    let payment = {
-      paymentMethod: paymentMethod,
-      cashAmount: Number(cashAmount || 0),
-      transferAmount: Number(transferAmount || 0),
-    };
-
-    if (paymentMethod === "cash") {
-      payment = { paymentMethod: "cash", cashAmount: cartTotal, transferAmount: 0 };
-    } else if (paymentMethod === "transfer") {
-      payment = { paymentMethod: "transfer", cashAmount: 0, transferAmount: cartTotal };
-    } else {
-      const sum = Number(payment.cashAmount) + Number(payment.transferAmount);
+    // Validate mixed payment
+    if (paymentMethod === "mixed") {
+      const sum = Number(cashAmount || 0) + Number(transferAmount || 0);
       if (Math.abs(sum - cartTotal) > 0.01) {
         alert("El pago mixto no coincide con el total.");
         return;
@@ -446,61 +335,19 @@ export default function App() {
 
     setIsProcessingSale(true);
 
-    const sellerName = myProfile?.name || fbUser.email;
-    const dayKey = dayKeyTucuman(new Date());
-
-    // Guardar costo al momento de vender para ganancias futuras
-    const items = cart.map((i) => ({
-      productId: i.id,
-      name: i.name,
-      qty: Number(i.qty),
-      unitPrice: Number(i.price),
-      itemCostPrice: Number(i.costPrice || 0),
-      barcode: i.barcode || null,
-      code: i.code || null,
-      lineTotal: Number(i.price) * Number(i.qty),
-    }));
-    const total = items.reduce((a, it) => a + it.lineTotal, 0);
-
-    const salesRef = collection(db, "artifacts", appId, "public", "data", "sales");
-    const saleKey = `${fbUser.uid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const saleDoc = doc(salesRef, saleKey); // docId determinístico evita duplicados si reintenta
-
     try {
-      await runTransaction(db, async (tx) => {
-        // Read all product docs first
-        const reads = [];
-        for (const item of items) {
-          const productRef = doc(db, "artifacts", appId, "public", "data", "products", item.productId);
-          const snap = await tx.get(productRef);
-          if (!snap.exists()) throw new Error(`Producto no encontrado: ${item.name}`);
-          reads.push({ item, productRef, data: snap.data() });
-        }
-
-        // Then writes: update stock (permitir negativo)
-        for (const r of reads) {
-          const currentStock = Number(r.data.stock || 0);
-          const nextStock = currentStock - Number(r.item.qty || 0);
-          tx.update(r.productRef, { stock: nextStock });
-        }
-
-        tx.set(saleDoc, {
-          sellerUid: fbUser.uid,
-          sellerName,
-          dayKey,
-          items,
-          total,
-          createdAt: serverTimestamp(),
-          status: "active",
-          ...payment,
-        });
-      });
-
+      await api.createSale(
+        cart,
+        paymentMethod,
+        Number(cashAmount || 0),
+        Number(transferAmount || 0)
+      );
       setCart([]);
       alert("Venta registrada");
+      loadData();
+      loadSales();
     } catch (e) {
-      console.error(e);
-      alert(e?.message || "No se pudo registrar la venta");
+      alert(e.message || "No se pudo registrar la venta");
     } finally {
       setIsProcessingSale(false);
     }
@@ -521,72 +368,54 @@ export default function App() {
       alert("Falta nombre / precio / costo / código barras / code / stock.");
       return;
     }
-    if (price < 0 || costPrice < 0) {
-      alert("Precio/costo inválidos.");
-      return;
-    }
 
-    // code único (case-insensitive)
-    const codeLower = code.toLowerCase();
-    const codeExists = products.some((p) => String(p.code || "").toLowerCase() === codeLower);
-    if (codeExists) {
-      alert("El code ya existe.");
-      return;
+    try {
+      await api.createProduct({ name, price, costPrice, barcode, code, stock });
+      setNewProduct({ name: "", price: "", costPrice: "", barcode: "", stock: "", code: "" });
+      loadData();
+    } catch (e) {
+      alert(e.message || "Error al crear producto");
     }
-
-    const ref = collection(db, "artifacts", appId, "public", "data", "products");
-    await addDoc(ref, { name, price, costPrice, barcode, code, stock, createdAt: serverTimestamp() });
-    setNewProduct({ name: "", price: "", costPrice: "", barcode: "", stock: "", code: "" });
   }
 
   async function updatePrice(productId, value) {
     if (!isAdmin) return;
     const price = Number(value);
     if (!Number.isFinite(price) || price < 0) return;
-    const ref = doc(db, "artifacts", appId, "public", "data", "products", productId);
-    await updateDoc(ref, { price });
+    try {
+      await api.updateProduct(productId, { price });
+      loadData();
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   async function updateCostPrice(productId, value) {
     if (!isAdmin) return;
     const costPrice = Number(value);
     if (!Number.isFinite(costPrice) || costPrice < 0) return;
-    const ref = doc(db, "artifacts", appId, "public", "data", "products", productId);
-    await updateDoc(ref, { costPrice });
+    try {
+      await api.updateProduct(productId, { costPrice });
+      loadData();
+    } catch (e) {
+      console.error(e);
+    }
   }
 
-  // Ajuste de stock con motivo (admin)
   async function adjustStock(productId, delta, reason) {
     if (!isAdmin) return;
     const change = Number(delta);
     if (!Number.isFinite(change) || change === 0) return;
-    const why = String(reason || "").trim();
-    if (!why) {
+    if (!reason || !reason.trim()) {
       alert("Escribí un motivo para el ajuste.");
       return;
     }
 
-    const productRef = doc(db, "artifacts", appId, "public", "data", "products", productId);
-    const adjRef = collection(db, "artifacts", appId, "public", "data", "stockAdjustments");
-
     try {
-      await runTransaction(db, async (tx) => {
-        const snap = await tx.get(productRef);
-        if (!snap.exists()) throw new Error("Producto no encontrado");
-        const current = Number(snap.data().stock || 0);
-        const next = current + change; // permitir negativo también
-        tx.update(productRef, { stock: next });
-        tx.set(doc(adjRef), {
-          productId,
-          delta: change,
-          reason: why,
-          createdAt: serverTimestamp(),
-          adminUid: fbUser.uid,
-          adminName: myProfile?.name || fbUser.email,
-        });
-      });
+      await api.adjustStock(productId, change, reason);
+      loadData();
     } catch (e) {
-      alert(e?.message || "No se pudo ajustar stock");
+      alert(e.message || "No se pudo ajustar stock");
     }
   }
 
@@ -609,7 +438,6 @@ export default function App() {
     }
 
     setPurchaseItems((prev) => {
-      // merge si ya existe
       const ex = prev.find((i) => i.productId === pid);
       if (ex) {
         const nextQty = Number(ex.qty) + qty;
@@ -626,76 +454,31 @@ export default function App() {
   }
 
   async function registerPurchase() {
-    if (!isAdmin) return;
-    if (!purchaseItems.length) return;
-
-    const purchaseRef = collection(db, "artifacts", appId, "public", "data", "purchases");
-    const totalCost = purchaseItems.reduce((a, i) => a + Number(i.qty) * Number(i.costPrice), 0);
-    const items = purchaseItems.map((i) => ({
-      productId: i.productId,
-      name: i.name,
-      qty: Number(i.qty),
-      costPrice: Number(i.costPrice),
-    }));
-    const purchaseDoc = doc(purchaseRef);
+    if (!isAdmin || !purchaseItems.length) return;
 
     try {
-      await runTransaction(db, async (tx) => {
-        const reads = [];
-        for (const item of items) {
-          const productRef = doc(db, "artifacts", appId, "public", "data", "products", item.productId);
-          const snap = await tx.get(productRef);
-          if (!snap.exists()) throw new Error(`Producto no encontrado: ${item.name}`);
-          reads.push({ item, productRef, data: snap.data() });
-        }
-
-        for (const r of reads) {
-          const currentStock = Number(r.data.stock || 0);
-          const nextStock = currentStock + Number(r.item.qty || 0);
-          tx.update(r.productRef, { stock: nextStock });
-        }
-
-        tx.set(purchaseDoc, {
-          dayKey: purchaseDayKey,
-          items,
-          totalCost,
-          createdAt: serverTimestamp(),
-          adminUid: fbUser.uid,
-          adminName: myProfile?.name || fbUser.email,
-        });
-      });
-
+      await api.createPurchase(purchaseDayKey, purchaseItems);
       setPurchaseItems([]);
       alert("Compra registrada");
+      loadData();
     } catch (e) {
-      alert(e?.message || "No se pudo registrar compra");
+      alert(e.message || "No se pudo registrar compra");
     }
   }
 
   // Sales filters for admin view
   const salesFiltered = useMemo(() => {
-    let list = sales;
-    // day filter
-    list = list.filter((s) => String(s.dayKey || "") === String(selectedDayKey || ""));
-    // user filter
-    if (salesFilterUser !== "all") {
-      list = list.filter((s) => s.sellerUid === salesFilterUser);
-    }
-    return list;
-  }, [sales, selectedDayKey, salesFilterUser]);
+    return sales.filter((s) => (s.status || "ACTIVE") !== "VOIDED" || isAdmin);
+  }, [sales, isAdmin]);
 
-  // Reports day
-  const daySales = useMemo(() => {
-    return sales.filter((s) => String(s.dayKey || "") === String(selectedDayKey || ""));
-  }, [sales, selectedDayKey]);
-
+  // Reports
   const daySalesActive = useMemo(() => {
-    return daySales.filter((s) => (s.status || "active") === "active");
-  }, [daySales]);
+    return sales.filter((s) => (s.status || "ACTIVE") === "ACTIVE");
+  }, [sales]);
 
   const voidedCount = useMemo(() => {
-    return daySales.filter((s) => (s.status || "active") === "voided").length;
-  }, [daySales]);
+    return sales.filter((s) => (s.status || "ACTIVE") === "VOIDED").length;
+  }, [sales]);
 
   const totalDay = useMemo(() => {
     return daySalesActive.reduce((a, s) => a + Number(s.total || 0), 0);
@@ -704,7 +487,7 @@ export default function App() {
   const totalsByUser = useMemo(() => {
     const acc = {};
     for (const s of daySalesActive) {
-      const k = s.sellerName || s.sellerUid || "Sin usuario";
+      const k = s.sellerName || "Sin usuario";
       acc[k] = (acc[k] || 0) + Number(s.total || 0);
     }
     return acc;
@@ -713,10 +496,10 @@ export default function App() {
   const totalsByPayment = useMemo(() => {
     const out = { cash: 0, transfer: 0 };
     for (const s of daySalesActive) {
-      const method = s.paymentMethod || "cash";
-      if (method === "transfer") {
+      const method = s.paymentMethod || "CASH";
+      if (method === "TRANSFER") {
         out.transfer += Number(s.transferAmount ?? s.total ?? 0);
-      } else if (method === "mixed") {
+      } else if (method === "MIXED") {
         out.cash += Number(s.cashAmount || 0);
         out.transfer += Number(s.transferAmount || 0);
       } else {
@@ -727,7 +510,6 @@ export default function App() {
   }, [daySalesActive]);
 
   const cogsDay = useMemo(() => {
-    // cost of goods sold usando itemCostPrice guardado en cada venta
     let sum = 0;
     for (const s of daySalesActive) {
       for (const it of s.items || []) {
@@ -746,69 +528,39 @@ export default function App() {
     }
   }, [isAdmin, selectedDayKey, todayKey]);
 
-  // Admin: void/delete/edit payment only
+  // Admin: void/delete/edit
   async function voidSale(sale) {
     if (!isAdmin) return;
-    if ((sale.status || "active") === "voided") return;
+    if ((sale.status || "ACTIVE") === "VOIDED") return;
 
     const reason = prompt("Motivo de anulación (opcional):", sale.voidReason || "");
-    const saleRef = doc(db, "artifacts", appId, "public", "data", "sales", sale.id);
 
     try {
-      await runTransaction(db, async (tx) => {
-        const saleSnap = await tx.get(saleRef);
-        if (!saleSnap.exists()) throw new Error("Venta no encontrada");
-        const data = saleSnap.data();
-        if ((data.status || "active") === "voided") return;
-
-        // Revertir stock (permitimos revertir siempre)
-        const items = data.items || [];
-        const reads = [];
-        for (const item of items) {
-          const productRef = doc(db, "artifacts", appId, "public", "data", "products", item.productId);
-          const productSnap = await tx.get(productRef);
-          if (!productSnap.exists()) throw new Error(`Producto no encontrado: ${item.name}`);
-          reads.push({ item, productRef, data: productSnap.data() });
-        }
-
-        for (const r of reads) {
-          const currentStock = Number(r.data.stock || 0);
-          tx.update(r.productRef, { stock: currentStock + Number(r.item.qty || 0) });
-        }
-
-        tx.update(saleRef, {
-          status: "voided",
-          voidedAt: serverTimestamp(),
-          voidReason: reason || "",
-        });
-      });
-
+      await api.voidSale(sale.id, reason || "");
       alert("Venta anulada");
+      loadSales();
+      loadData();
     } catch (e) {
-      alert(e?.message || "No se pudo anular la venta");
+      alert(e.message || "No se pudo anular la venta");
     }
   }
 
   async function deleteSale(sale) {
     if (!isAdmin) return;
 
-    const status = sale.status || "active";
-    if (status !== "voided") {
+    const status = sale.status || "ACTIVE";
+    if (status !== "VOIDED") {
       if (!confirm("Esta venta no está anulada. ¿Querés anularla y borrarla?")) return;
       await voidSale(sale);
     }
     if (!confirm("¿Borrar venta anulada?")) return;
 
-    const saleRef = doc(db, "artifacts", appId, "public", "data", "sales", sale.id);
     try {
-      await runTransaction(db, async (tx) => {
-        const snap = await tx.get(saleRef);
-        if (!snap.exists()) return;
-        tx.delete(saleRef);
-      });
+      await api.deleteSale(sale.id);
       alert("Venta borrada");
+      loadSales();
     } catch (e) {
-      alert(e?.message || "No se pudo borrar la venta");
+      alert(e.message || "No se pudo borrar la venta");
     }
   }
 
@@ -819,16 +571,8 @@ export default function App() {
     const total = Number(saleEdit.total || 0);
     const pm = saleEdit.paymentMethod;
 
-    let payment = {
-      paymentMethod: pm,
-      cashAmount: Number(saleEdit.cashAmount || 0),
-      transferAmount: Number(saleEdit.transferAmount || 0),
-    };
-
-    if (pm === "cash") payment = { paymentMethod: "cash", cashAmount: total, transferAmount: 0 };
-    if (pm === "transfer") payment = { paymentMethod: "transfer", cashAmount: 0, transferAmount: total };
     if (pm === "mixed") {
-      const sum = payment.cashAmount + payment.transferAmount;
+      const sum = Number(saleEdit.cashAmount) + Number(saleEdit.transferAmount);
       if (Math.abs(sum - total) > 0.01) {
         alert("El pago mixto no coincide con el total");
         return;
@@ -836,11 +580,47 @@ export default function App() {
     }
 
     try {
-      const saleRef = doc(db, "artifacts", appId, "public", "data", "sales", saleId);
-      await updateDoc(saleRef, payment);
+      await api.updateSalePayment(
+        saleId,
+        pm,
+        Number(saleEdit.cashAmount),
+        Number(saleEdit.transferAmount)
+      );
       setSaleEdit(null);
+      loadSales();
     } catch (e) {
-      alert(e?.message || "No se pudo editar la venta");
+      alert(e.message || "No se pudo editar la venta");
+    }
+  }
+
+  // User management
+  async function createUser() {
+    if (!isAdmin) return;
+
+    if (!newUser.username || !newUser.password || !newUser.name) {
+      alert("Usuario, contraseña y nombre requeridos");
+      return;
+    }
+
+    try {
+      await api.createUser(newUser);
+      setNewUser({ username: "", password: "", name: "" });
+      alert("Usuario creado");
+      loadData();
+    } catch (e) {
+      alert(e.message || "Error al crear usuario");
+    }
+  }
+
+  async function deleteUserAction(userId) {
+    if (!isAdmin) return;
+    if (!confirm("¿Desactivar este usuario?")) return;
+
+    try {
+      await api.deleteUser(userId);
+      loadData();
+    } catch (e) {
+      alert(e.message || "Error al eliminar usuario");
     }
   }
 
@@ -857,8 +637,17 @@ export default function App() {
               ? "Ventas"
               : "Reporte Diario";
 
+  // Loading state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100">
+        <div className="text-slate-600">Cargando...</div>
+      </div>
+    );
+  }
+
   // ===== LOGIN SCREEN =====
-  if (!fbUser) {
+  if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-100">
         <div className="bg-white w-full max-w-md p-8 rounded-2xl shadow-lg border border-slate-200">
@@ -904,10 +693,6 @@ export default function App() {
           >
             Entrar
           </button>
-
-          <div className="text-xs text-slate-400 mt-4">
-            El login usa emails internos: <code>usuario@pos.local</code>
-          </div>
         </div>
       </div>
     );
@@ -937,7 +722,7 @@ export default function App() {
           <div className="font-semibold text-2xl">Pago Fácil POS</div>
         </div>
         <div className="text-xs text-slate-300 mb-4">
-          Sesión: <b>{fbUser.email}</b> {isAdmin ? "(admin)" : "(caja)"}
+          Sesión: <b>{user.name || user.email}</b> {isAdmin ? "(admin)" : "(caja)"}
         </div>
 
         <button
@@ -1028,7 +813,7 @@ export default function App() {
           </div>
           <div className="text-right">
             <div className="text-xs uppercase tracking-widest text-slate-400">Usuario actual</div>
-            <div className="text-sm font-semibold text-slate-800">{myProfile?.name || fbUser.email}</div>
+            <div className="text-sm font-semibold text-slate-800">{user.name || user.email}</div>
             <div className="text-xs text-slate-500">{isAdmin ? "Administrador" : "Cajero"}</div>
           </div>
         </div>
@@ -1469,7 +1254,7 @@ export default function App() {
               </div>
             </div>
 
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
               <div className="p-4 border-b border-slate-200 flex items-center justify-between">
                 <div className="font-bold">Items</div>
                 <div className="text-sm text-slate-600">
@@ -1554,8 +1339,8 @@ export default function App() {
                   >
                     <option value="all">Todos</option>
                     {profiles.map((p) => (
-                      <option key={p.uid} value={p.uid}>
-                        {p.name || p.username || p.uid}
+                      <option key={p.id} value={p.id}>
+                        {p.name || p.username || p.id}
                       </option>
                     ))}
                   </select>
@@ -1563,13 +1348,13 @@ export default function App() {
 
                 <div className="flex items-end">
                   <div className="text-sm text-slate-600">
-                    Total ventas (activas): $ {money(salesFiltered.filter((s) => (s.status || "active") === "active").reduce((a, s) => a + Number(s.total || 0), 0))}
+                    Total ventas (activas): $ {money(salesFiltered.filter((s) => (s.status || "ACTIVE") === "ACTIVE").reduce((a, s) => a + Number(s.total || 0), 0))}
                   </div>
                 </div>
               </div>
             </div>
 
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
@@ -1591,23 +1376,23 @@ export default function App() {
                   )}
 
                   {salesFiltered.map((s) => {
-                    const status = s.status || "active";
-                    const method = s.paymentMethod || "cash";
+                    const status = s.status || "ACTIVE";
+                    const method = s.paymentMethod || "CASH";
                     const cash = s.cashAmount != null ? Number(s.cashAmount) : Number(s.total || 0);
                     const transfer = s.transferAmount != null ? Number(s.transferAmount) : 0;
 
                     return (
-                      <tr key={s.id} className={"hover:bg-slate-50 even:bg-slate-50/60 " + (status === "voided" ? "opacity-60" : "")}>
-                        <td className="p-4">{timeFromTimestamp(s.createdAt)}</td>
-                        <td className="p-4">{s.sellerName || s.sellerUid}</td>
+                      <tr key={s.id} className={"hover:bg-slate-50 even:bg-slate-50/60 " + (status === "VOIDED" ? "opacity-60" : "")}>
+                        <td className="p-4">{formatTime(s.createdAt)}</td>
+                        <td className="p-4">{s.sellerName || s.sellerId}</td>
                         <td className="p-4 font-semibold">$ {money(s.total)}</td>
                         <td className="p-4 text-slate-600">
-                          {method === "cash" && `Efectivo $ ${money(cash)}`}
-                          {method === "transfer" && `Transferencia $ ${money(transfer)}`}
-                          {method === "mixed" && `Mixto $ ${money(cash)} / $ ${money(transfer)}`}
+                          {method === "CASH" && `Efectivo $ ${money(cash)}`}
+                          {method === "TRANSFER" && `Transferencia $ ${money(transfer)}`}
+                          {method === "MIXED" && `Mixto $ ${money(cash)} / $ ${money(transfer)}`}
                         </td>
                         <td className="p-4">
-                          <span className={status === "voided" ? "text-rose-600" : "text-emerald-700"}>
+                          <span className={status === "VOIDED" ? "text-rose-600" : "text-emerald-700"}>
                             {status}
                           </span>
                         </td>
@@ -1618,18 +1403,18 @@ export default function App() {
                             </button>
                             <button
                               className="text-indigo-600 font-semibold"
-                              disabled={status === "voided"}
+                              disabled={status === "VOIDED"}
                               onClick={() => setSaleEdit({
                                 saleId: s.id,
                                 total: s.total,
-                                paymentMethod: s.paymentMethod || "cash",
+                                paymentMethod: method.toLowerCase(),
                                 cashAmount: cash,
                                 transferAmount: transfer,
                               })}
                             >
                               Editar pago
                             </button>
-                            <button className="text-amber-600 font-semibold" disabled={status === "voided"} onClick={() => voidSale(s)}>
+                            <button className="text-amber-600 font-semibold" disabled={status === "VOIDED"} onClick={() => voidSale(s)}>
                               Anular
                             </button>
                             <button className="text-red-600 font-semibold" onClick={() => deleteSale(s)}>
@@ -1652,7 +1437,7 @@ export default function App() {
                     <button className="text-slate-500" onClick={() => setSaleDetail(null)}>X</button>
                   </div>
                   <div className="text-sm text-slate-500 mb-3">
-                    {saleDetail.sellerName} • {timeFromTimestamp(saleDetail.createdAt)} • {saleDetail.status || "active"}
+                    {saleDetail.sellerName} • {formatTime(saleDetail.createdAt)} • {saleDetail.status || "ACTIVE"}
                     {saleDetail.voidReason ? ` • ${saleDetail.voidReason}` : ""}
                   </div>
                   <div className="space-y-2">
@@ -1683,7 +1468,7 @@ export default function App() {
                       className="w-full p-3 border border-slate-200 rounded-lg bg-white"
                       value={saleEdit.paymentMethod}
                       onChange={(e) => {
-                               const method = e.target.value;
+                        const method = e.target.value;
                         if (method === "cash") {
                           setSaleEdit((s) => ({ ...s, paymentMethod: method, cashAmount: s.total, transferAmount: 0 }));
                         } else if (method === "transfer") {
@@ -1760,33 +1545,67 @@ export default function App() {
             <h2 className="text-2xl font-semibold text-slate-900 mb-4">Usuarios (admin)</h2>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
-              <div className="font-bold mb-2">Crear cajero</div>
-              <div className="text-sm text-slate-600">
-                En el plan gratis, no se pueden crear usuarios de Auth desde la web (requiere Functions/Blaze).
-                Crealos en Firebase Console → Authentication → Users, y luego creá su perfil en Firestore con role="cashier".
+              <div className="font-bold mb-3">Crear cajero</div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <input
+                  className="p-3 border border-slate-200 rounded-lg bg-white shadow-sm"
+                  placeholder="Usuario"
+                  value={newUser.username}
+                  onChange={(e) => setNewUser((s) => ({ ...s, username: e.target.value }))}
+                />
+                <input
+                  className="p-3 border border-slate-200 rounded-lg bg-white shadow-sm"
+                  placeholder="Contraseña"
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser((s) => ({ ...s, password: e.target.value }))}
+                />
+                <input
+                  className="p-3 border border-slate-200 rounded-lg bg-white shadow-sm"
+                  placeholder="Nombre completo"
+                  value={newUser.name}
+                  onChange={(e) => setNewUser((s) => ({ ...s, name: e.target.value }))}
+                />
+                <button
+                  onClick={createUser}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg shadow-sm transition"
+                >
+                  Crear
+                </button>
               </div>
             </div>
 
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="p-4">Nombre</th>
                     <th className="p-4">Username</th>
                     <th className="p-4">Rol</th>
+                    <th className="p-4">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {profiles.map((u) => (
-                    <tr key={u.uid} className="hover:bg-slate-50 even:bg-slate-50/60">
+                    <tr key={u.id} className="hover:bg-slate-50 even:bg-slate-50/60">
                       <td className="p-4 font-semibold">{u.name}</td>
                       <td className="p-4 text-slate-600">{u.username}</td>
                       <td className="p-4 text-slate-600">{u.role}</td>
+                      <td className="p-4">
+                        {u.id !== user.id && (
+                          <button
+                            onClick={() => deleteUserAction(u.id)}
+                            className="text-red-600 font-semibold hover:text-red-700"
+                          >
+                            Desactivar
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {profiles.length === 0 && (
                     <tr>
-                      <td colSpan={3} className="p-10 text-center text-slate-400">
+                      <td colSpan={4} className="p-10 text-center text-slate-400">
                         Sin usuarios
                       </td>
                     </tr>
@@ -1807,13 +1626,13 @@ export default function App() {
                 <div className="flex items-end justify-between gap-4">
                   <div>
                     <div className="text-slate-500">Fecha</div>
-                  <input
-                    type="date"
-                    className="mt-1 p-2 border border-slate-200 rounded-lg"
-                    value={selectedDayKey}
-                    onChange={(e) => setSelectedDayKey(e.target.value)}
-                    max={isAdmin ? undefined : todayKey}
-                  />
+                    <input
+                      type="date"
+                      className="mt-1 p-2 border border-slate-200 rounded-lg"
+                      value={selectedDayKey}
+                      onChange={(e) => setSelectedDayKey(e.target.value)}
+                      max={isAdmin ? undefined : todayKey}
+                    />
                   </div>
 
                   <div className="bg-blue-50 border border-blue-100 text-blue-700 font-semibold px-4 py-2 rounded-lg">
@@ -1897,17 +1716,3 @@ export default function App() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
