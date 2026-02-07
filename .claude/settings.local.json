@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir /s \"C:\\\\Users\\\\exequ\\\\Documents\\\\pos-pagofacil\\\\src\")",
+      "Bash(dir:*)"
+    ]
+  }
+}

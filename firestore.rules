@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    function userDoc(appId) {
+      return get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin(appId) {
+      return signedIn() && userDoc(appId).role == "admin";
+    }
+
+    function isCashier(appId) {
+      return signedIn() && userDoc(appId).role == "cashier";
+    }
+
+    // PRODUCTS
+    match /artifacts/{appId}/public/data/products/{id} {
+      allow read: if signedIn();
+
+      // Admin: full control
+      allow create, update, delete: if isAdmin(appId);
+
+      // Any signed-in user: ONLY update stock field (needed if your sale decrements stock)
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(["stock"]);
+    }
+
+    // SALES
+    match /artifacts/{appId}/public/data/sales/{id} {
+      // Admin can read everything
+      allow read: if isAdmin(appId)
+        // Cashier can read only own sales
+        || (signedIn() && resource.data.sellerUid == request.auth.uid);
+
+      // Any signed-in user can create a sale
+      allow create: if signedIn();
+
+      // Only admin can modify/delete sales
+      allow update, delete: if isAdmin(appId);
+    }
+
+    // USERS (profiles)
+    match /artifacts/{appId}/public/data/users/{uid} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin(appId);
+    }
+
+    // PURCHASES
+    match /artifacts/{appId}/public/data/purchases/{id} {
+      allow read, create, update, delete: if isAdmin(appId);
+    }
+
+    // STOCK ADJUSTMENTS
+    match /artifacts/{appId}/public/data/stockAdjustments/{id} {
+      allow read, create, update, delete: if isAdmin(appId);
+    }
+  }
+}
