@@ -97,7 +97,7 @@ router.post("/", authenticate, requireAdmin, async (req, res) => {
 // PATCH /api/products/:id - Update product (admin only)
 router.patch("/:id", authenticate, requireAdmin, async (req, res) => {
   try {
-    const { price, costPrice, name, barcode, code, stock } = req.body;
+    const { price, costPrice, name, barcode, code, stock, active } = req.body;
     const updateData = {};
 
     if (price != null) {
@@ -132,6 +132,7 @@ router.patch("/:id", authenticate, requireAdmin, async (req, res) => {
     }
 
     if (stock != null) updateData.stock = Number(stock);
+    if (active != null) updateData.active = Boolean(active);
 
     const product = await prisma.product.update({
       where: { id: req.params.id },

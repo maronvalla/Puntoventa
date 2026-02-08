@@ -374,8 +374,8 @@ export default function App() {
     const code = newProduct.code.trim();
     const stock = Number(newProduct.stock);
 
-    if (!name || !Number.isFinite(price) || !Number.isFinite(costPrice) || !barcode || !code || !Number.isFinite(stock)) {
-      alert("Falta nombre / precio / costo / código barras / code / stock.");
+    if (!name || !Number.isFinite(price) || !Number.isFinite(costPrice) || !code || !Number.isFinite(stock)) {
+      alert("Falta nombre / precio / costo / code / stock.");
       return;
     }
 
@@ -426,6 +426,32 @@ export default function App() {
       loadData();
     } catch (e) {
       alert(e.message || "No se pudo ajustar stock");
+    }
+  }
+
+  async function deleteProductAction(product) {
+    if (!isAdmin) return;
+    if (!confirm(`¿Eliminar "${product.name}"? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+    try {
+      await api.deleteProduct(product.id);
+      loadData();
+    } catch (e) {
+      alert(e.message || "No se pudo eliminar el producto");
+    }
+  }
+
+  async function deactivateProductAction(product) {
+    if (!isAdmin) return;
+    if (!confirm(`¿Desactivar "${product.name}"?`)) {
+      return;
+    }
+    try {
+      await api.updateProduct(product.id, { active: false });
+      loadData();
+    } catch (e) {
+      alert(e.message || "No se pudo desactivar el producto");
     }
   }
 
@@ -1120,8 +1146,8 @@ export default function App() {
               </button>
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-              <table className="w-full text-left text-sm">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+              <table className="min-w-[980px] w-full text-left text-sm">
                 <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="p-4">Producto</th>
@@ -1133,6 +1159,7 @@ export default function App() {
                     <th className="p-4">Code</th>
                     <th className="p-4">Stock</th>
                     <th className="p-4">Ajuste</th>
+                    <th className="p-4">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1144,7 +1171,7 @@ export default function App() {
 
                     return (
                       <tr key={p.id} className="hover:bg-slate-50 even:bg-slate-50/60">
-                        <td className="p-4 font-semibold">{p.name}</td>
+                        <td className="p-4 font-semibold whitespace-nowrap">{p.name}</td>
 
                         <td className="p-4">
                           <input
@@ -1178,7 +1205,7 @@ export default function App() {
                         </td>
 
                         <td className="p-4">
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-2">
                             <input
                               type="number"
                               className="p-2 border border-slate-200 rounded-lg w-20"
@@ -1193,7 +1220,7 @@ export default function App() {
                             />
                             <input
                               type="text"
-                              className="p-2 border border-slate-200 rounded-lg w-40"
+                              className="p-2 border border-slate-200 rounded-lg w-44"
                               placeholder="Motivo"
                               value={stockAdjust[p.id]?.reason ?? ""}
                               onChange={(e) =>
@@ -1213,6 +1240,22 @@ export default function App() {
                               }}
                             >
                               +/-
+                            </button>
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-3">
+                            <button
+                              className="text-amber-600 font-semibold hover:text-amber-700"
+                              onClick={() => deactivateProductAction(p)}
+                            >
+                              Desactivar
+                            </button>
+                            <button
+                              className="text-red-600 font-semibold hover:text-red-700"
+                              onClick={() => deleteProductAction(p)}
+                            >
+                              Eliminar
                             </button>
                           </div>
                         </td>
