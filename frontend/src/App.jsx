@@ -911,7 +911,7 @@ export default function App() {
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
-                      const term = searchTerm.trim().toLowerCase();
+                      const term = e.currentTarget.value.trim().toLowerCase();
                       if (!term && cart.length > 0 && !isProcessingSale) {
                         e.preventDefault();
                         processSale();
