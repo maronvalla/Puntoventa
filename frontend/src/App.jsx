@@ -96,7 +96,17 @@ export default function App() {
   const [saleEdit, setSaleEdit] = useState(null);
 
   // New user form (admin)
-  const [newUser, setNewUser] = useState({ username: "", password: "", name: "" });
+  const [newUser, setNewUser] = useState({
+    username: "",
+    password: "",
+    name: "",
+    role: "CASHIER",
+  });
+  const [resetAdminForm, setResetAdminForm] = useState({
+    username: "",
+    password: "",
+    name: "",
+  });
 
   // Check auth on mount
   useEffect(() => {
@@ -604,11 +614,37 @@ export default function App() {
 
     try {
       await api.createUser(newUser);
-      setNewUser({ username: "", password: "", name: "" });
+      setNewUser({ username: "", password: "", name: "", role: "CASHIER" });
       alert("Usuario creado");
       loadData();
     } catch (e) {
       alert(e.message || "Error al crear usuario");
+    }
+  }
+
+  async function resetAdmin() {
+    if (!isAdmin) return;
+
+    if (!resetAdminForm.username || !resetAdminForm.password || !resetAdminForm.name) {
+      alert("Usuario, contraseña y nombre requeridos");
+      return;
+    }
+
+    if (
+      !confirm(
+        "Esto desactiva todos los usuarios y deja solo un admin. ¿Continuar?"
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await api.resetAdmin(resetAdminForm);
+      setResetAdminForm({ username: "", password: "", name: "" });
+      alert("Admin reiniciado. Se desactivaron los demás usuarios.");
+      loadData();
+    } catch (e) {
+      alert(e.message || "Error al reiniciar admin");
     }
   }
 
@@ -1545,8 +1581,8 @@ export default function App() {
             <h2 className="text-2xl font-semibold text-slate-900 mb-4">Usuarios (admin)</h2>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
-              <div className="font-bold mb-3">Crear cajero</div>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="font-bold mb-3">Crear usuario</div>
+              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
                 <input
                   className="p-3 border border-slate-200 rounded-lg bg-white shadow-sm"
                   placeholder="Usuario"
@@ -1566,11 +1602,59 @@ export default function App() {
                   value={newUser.name}
                   onChange={(e) => setNewUser((s) => ({ ...s, name: e.target.value }))}
                 />
+                <select
+                  className="p-3 border border-slate-200 rounded-lg bg-white shadow-sm"
+                  value={newUser.role}
+                  onChange={(e) => setNewUser((s) => ({ ...s, role: e.target.value }))}
+                >
+                  <option value="CASHIER">Cajero</option>
+                  <option value="ADMIN">Administrador</option>
+                </select>
                 <button
                   onClick={createUser}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg shadow-sm transition"
                 >
                   Crear
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
+              <div className="font-bold mb-3">Reiniciar admin</div>
+              <div className="text-sm text-slate-500 mb-3">
+                Esto deja un solo administrador activo y desactiva el resto.
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <input
+                  className="p-3 border border-slate-200 rounded-lg bg-white shadow-sm"
+                  placeholder="Usuario admin"
+                  value={resetAdminForm.username}
+                  onChange={(e) =>
+                    setResetAdminForm((s) => ({ ...s, username: e.target.value }))
+                  }
+                />
+                <input
+                  className="p-3 border border-slate-200 rounded-lg bg-white shadow-sm"
+                  placeholder="Contraseña admin"
+                  type="password"
+                  value={resetAdminForm.password}
+                  onChange={(e) =>
+                    setResetAdminForm((s) => ({ ...s, password: e.target.value }))
+                  }
+                />
+                <input
+                  className="p-3 border border-slate-200 rounded-lg bg-white shadow-sm"
+                  placeholder="Nombre completo"
+                  value={resetAdminForm.name}
+                  onChange={(e) =>
+                    setResetAdminForm((s) => ({ ...s, name: e.target.value }))
+                  }
+                />
+                <button
+                  onClick={resetAdmin}
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2.5 rounded-lg shadow-sm transition"
+                >
+                  Reiniciar admin
                 </button>
               </div>
             </div>

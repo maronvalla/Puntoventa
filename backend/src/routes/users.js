@@ -31,7 +31,7 @@ router.get("/", authenticate, async (req, res) => {
 // POST /api/users - Create cashier (admin only)
 router.post("/", authenticate, requireAdmin, async (req, res) => {
   try {
-    const { username, password, name } = req.body;
+    const { username, password, name, role } = req.body;
 
     if (!username || !password || !name) {
       return res.status(400).json({ error: "Usuario, contraseña y nombre requeridos" });
@@ -57,13 +57,14 @@ router.post("/", authenticate, requireAdmin, async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const roleNormalized = role === "ADMIN" ? "ADMIN" : "CASHIER";
     const user = await prisma.user.create({
       data: {
         username: usernameClean,
         email,
         password: hashedPassword,
         name: name.trim(),
-        role: "CASHIER",
+        role: roleNormalized,
       },
       select: {
         id: true,
@@ -79,6 +80,78 @@ router.post("/", authenticate, requireAdmin, async (req, res) => {
   } catch (error) {
     console.error("Create user error:", error);
     res.status(500).json({ error: "Error al crear usuario" });
+  }
+});
+
+// POST /api/users/reset-admin - Reset to a single admin (admin only)
+router.post("/reset-admin", authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { username, password, name } = req.body;
+
+    if (!username || !password || !name) {
+      return res.status(400).json({ error: "Usuario, contraseña y nombre requeridos" });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
+    }
+
+    const usernameClean = username.toLowerCase().trim();
+    const email = `${usernameClean}@pos.local`;
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const existingByUsername = await tx.user.findUnique({
+        where: { username: usernameClean },
+      });
+
+      const existingByEmail = existingByUsername
+        ? null
+        : await tx.user.findUnique({ where: { email } });
+
+      const adminUser = existingByUsername || existingByEmail;
+
+      const admin = adminUser
+        ? await tx.user.update({
+            where: { id: adminUser.id },
+            data: {
+              username: usernameClean,
+              email,
+              password: hashedPassword,
+              name: name.trim(),
+              role: "ADMIN",
+              active: true,
+            },
+          })
+        : await tx.user.create({
+            data: {
+              username: usernameClean,
+              email,
+              password: hashedPassword,
+              name: name.trim(),
+              role: "ADMIN",
+              active: true,
+            },
+          });
+
+      await tx.user.updateMany({
+        where: { id: { not: admin.id } },
+        data: { active: false },
+      });
+
+      return admin;
+    });
+
+    res.json({
+      id: result.id,
+      username: result.username,
+      email: result.email,
+      name: result.name,
+      role: result.role,
+    });
+  } catch (error) {
+    console.error("Reset admin error:", error);
+    res.status(500).json({ error: "Error al reiniciar admin" });
   }
 });
 

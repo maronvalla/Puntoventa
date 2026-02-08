@@ -159,6 +159,13 @@ class ApiService {
     });
   }
 
+  async resetAdmin(data) {
+    return this.request("/users/reset-admin", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async updateUser(id, data) {
     return this.request(`/users/${id}`, {
       method: "PATCH",
