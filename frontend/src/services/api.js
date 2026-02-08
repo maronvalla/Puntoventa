@@ -19,6 +19,9 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
+    if (!API_BASE_URL) {
+      throw new Error("Falta configurar VITE_API_BASE_URL en el frontend.");
+    }
     const url = `${API_BASE_URL}${endpoint}`;
 
     const headers = {
@@ -35,10 +38,19 @@ class ApiService {
       headers,
     });
 
-    const data = await response.json();
+    const text = await response.text();
+    let data = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        // Non-JSON response (e.g. HTML or empty), keep text for error
+        data = { error: text };
+      }
+    }
 
     if (!response.ok) {
-      throw new Error(data.error || "Error en la solicitud");
+      throw new Error(data.error || `Error en la solicitud (${response.status})`);
     }
 
     return data;
