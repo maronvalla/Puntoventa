@@ -188,6 +188,12 @@ export default function App() {
         e.preventDefault();
         processSale();
       }
+      if (e.key === "Escape" && cart.length > 0) {
+        e.preventDefault();
+        if (confirm("Vaciar carrito?")) {
+          clearCart();
+        }
+      }
     }
 
     document.addEventListener("keydown", handleKeyDown);
@@ -282,6 +288,10 @@ export default function App() {
 
   function removeFromCart(id) {
     setCart((prev) => prev.filter((i) => i.id !== id));
+  }
+
+  function clearCart() {
+    setCart([]);
   }
 
   function handleBarcode(code) {
@@ -964,7 +974,7 @@ export default function App() {
               </div>
 
               <div className="text-xs text-slate-500 mt-3">
-                Tip: tocá una vez la pantalla y escaneá. El lector escribe y manda Enter.
+                Tip: tocá una vez la pantalla y escaneá. El lector escribe y manda Enter. ESC vacía el carrito.
               </div>
             </div>
 
