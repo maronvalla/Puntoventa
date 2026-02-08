@@ -875,6 +875,16 @@ export default function App() {
                     setSearchTerm(e.target.value);
                     setSearchOpen(true);
                   }}
+                  onBlur={() => {
+                    if (view !== "pos") return;
+                    setTimeout(() => {
+                      const activeTag = document.activeElement?.tagName?.toLowerCase();
+                      if (activeTag === "input" || activeTag === "textarea" || activeTag === "select") {
+                        return;
+                      }
+                      searchRef.current?.focus();
+                    }, 0);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       const term = e.currentTarget.value.trim().toLowerCase();
