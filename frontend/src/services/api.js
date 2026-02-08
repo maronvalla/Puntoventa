@@ -130,13 +130,6 @@ class ApiService {
     });
   }
 
-  async quickSale(code) {
-    return this.request("/sales/quick", {
-      method: "POST",
-      body: JSON.stringify({ code }),
-    });
-  }
-
   async updateSalePayment(id, paymentMethod, cashAmount, transferAmount) {
     return this.request(`/sales/${id}`, {
       method: "PATCH",

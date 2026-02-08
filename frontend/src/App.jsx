@@ -54,8 +54,6 @@ export default function App() {
   const scanRef = useRef(null);
   const [scanBuffer, setScanBuffer] = useState("");
 
-  // Quick code buffer for rapid sales
-  const [quickCodeBuffer, setQuickCodeBuffer] = useState("");
 
   // POS search
   const searchRef = useRef(null);
@@ -178,7 +176,7 @@ export default function App() {
     }
   }, [view]);
 
-  // Global keyboard listener for quick code sales
+  // Global keyboard listener for quick sale
   useEffect(() => {
     if (view !== "pos") return;
 
@@ -186,34 +184,15 @@ export default function App() {
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
 
-      if (/^[0-9]$/.test(e.key)) {
-        setQuickCodeBuffer((prev) => prev + e.key);
-      }
-
-      if (e.key === "Enter" && quickCodeBuffer) {
+      if (e.key === "Enter" && cart.length > 0 && !isProcessingSale) {
         e.preventDefault();
-        handleQuickSale(quickCodeBuffer);
-        setQuickCodeBuffer("");
-      } else if (e.key === "Enter" && !quickCodeBuffer) {
-        if (cart.length > 0 && !isProcessingSale) {
-          e.preventDefault();
-          processSale();
-        }
-      }
-
-      if (e.key === "Escape") {
-        setQuickCodeBuffer("");
-      }
-
-      if (e.key === "Backspace") {
-        e.preventDefault();
-        setQuickCodeBuffer((prev) => prev.slice(0, -1));
+        processSale();
       }
     }
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [view, quickCodeBuffer, products, isProcessingSale]);
+  }, [view, cart.length, isProcessingSale]);
 
   // Cart total
   const cartTotal = useMemo(() => {
@@ -317,23 +296,6 @@ export default function App() {
     addToCart(product);
   }
 
-  // Quick sale by short code
-  async function handleQuickSale(code) {
-    const c = String(code || "").trim();
-    if (!c || isProcessingSale) return;
-
-    setIsProcessingSale(true);
-    try {
-      const result = await api.quickSale(c);
-      alert(`Venta rápida: ${result.productName} - $${money(result.total)}`);
-      loadData();
-      loadSales();
-    } catch (e) {
-      alert(e.message || "Error en venta rápida");
-    } finally {
-      setIsProcessingSale(false);
-    }
-  }
 
   // Process sale
   async function processSale() {
@@ -888,12 +850,6 @@ export default function App() {
         {/* POS */}
         {view === "pos" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Quick code indicator */}
-            {quickCodeBuffer && (
-              <div className="fixed top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg text-2xl font-mono shadow-lg z-50">
-                Código: {quickCodeBuffer}
-              </div>
-            )}
 
             <div className="lg:col-span-2">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">Productos</h2>
