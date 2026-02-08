@@ -52,7 +52,31 @@ router.post("/", authenticate, requireAdmin, async (req, res) => {
     });
 
     if (existing) {
-      return res.status(400).json({ error: "El usuario ya existe" });
+      if (existing.active) {
+        return res.status(400).json({ error: "El usuario ya existe" });
+      }
+
+      const reactivated = await prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          username: usernameClean,
+          email,
+          password: hashedPassword,
+          name: name.trim(),
+          role: roleNormalized,
+          active: true,
+        },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          name: true,
+          role: true,
+          createdAt: true,
+        },
+      });
+
+      return res.status(200).json(reactivated);
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
