@@ -43,6 +43,8 @@ router.post("/", authenticate, requireAdmin, async (req, res) => {
 
     const usernameClean = username.toLowerCase().trim();
     const email = `${usernameClean}@pos.local`;
+    const roleNormalized = role === "ADMIN" ? "ADMIN" : "CASHIER";
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // Check if username exists
     const existing = await prisma.user.findFirst({
@@ -78,10 +80,6 @@ router.post("/", authenticate, requireAdmin, async (req, res) => {
 
       return res.status(200).json(reactivated);
     }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const roleNormalized = role === "ADMIN" ? "ADMIN" : "CASHIER";
     const user = await prisma.user.create({
       data: {
         username: usernameClean,
