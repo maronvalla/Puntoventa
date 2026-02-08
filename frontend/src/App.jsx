@@ -194,6 +194,11 @@ export default function App() {
         e.preventDefault();
         handleQuickSale(quickCodeBuffer);
         setQuickCodeBuffer("");
+      } else if (e.key === "Enter" && !quickCodeBuffer) {
+        if (cart.length > 0 && !isProcessingSale) {
+          e.preventDefault();
+          processSale();
+        }
       }
 
       if (e.key === "Escape") {
