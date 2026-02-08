@@ -193,17 +193,18 @@ export default function App() {
 
     function handleKeyDown(e) {
       const tag = document.activeElement?.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select") return;
-
-      if (e.key === "Enter" && cart.length > 0 && !isProcessingSale) {
-        e.preventDefault();
-        processSale();
-      }
       if (e.key === "Escape" && cart.length > 0) {
         e.preventDefault();
         if (confirm("Vaciar carrito?")) {
           clearCart();
         }
+        return;
+      }
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+
+      if (e.key === "Enter" && cart.length > 0 && !isProcessingSale) {
+        e.preventDefault();
+        processSale();
       }
     }
 
