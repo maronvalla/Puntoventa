@@ -55,7 +55,7 @@ app.use((req, res) => {
   res.status(404).json({ error: "Ruta no encontrada" });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Server listening on", PORT);
   console.log(`📍 Environment: ${process.env.NODE_ENV || "development"}`);
 });
