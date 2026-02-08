@@ -1026,8 +1026,9 @@ export default function App() {
                   >
                     <div>
                       <div className="font-semibold">{i.name}</div>
-                      <div className="text-xs text-slate-500">
-                        {i.qty} x $ {money(i.price)}
+                      <div className="text-sm text-slate-600">
+                        <span className="text-lg font-semibold text-slate-800">{i.qty}</span>{" "}
+                        x $ {money(i.price)}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
