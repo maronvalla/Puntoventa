@@ -59,6 +59,7 @@ export default function App() {
   const searchRef = useRef(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchIndex, setSearchIndex] = useState(-1);
 
   // Payment
   const [paymentMethod, setPaymentMethod] = useState("cash");
@@ -885,6 +886,7 @@ export default function App() {
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
                     setSearchOpen(true);
+                    setSearchIndex(-1);
                   }}
                   onBlur={() => {
                     if (view !== "pos") return;
@@ -920,11 +922,38 @@ export default function App() {
 
                       if (matches.length === 1) {
                         addToCart(matches[0]);
+                        setSearchIndex(-1);
                         setSearchTerm("");
                         setSearchOpen(false);
                       } else {
-                        setSearchOpen(true);
+                        if (searchIndex >= 0 && matches[searchIndex]) {
+                          addToCart(matches[searchIndex]);
+                          setSearchIndex(-1);
+                          setSearchTerm("");
+                          setSearchOpen(false);
+                        } else {
+                          setSearchOpen(true);
+                        }
                       }
+                    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                      const term = e.currentTarget.value.trim().toLowerCase();
+                      if (!term) return;
+                      e.preventDefault();
+                      const byCode = products.filter((p) =>
+                        String(p.code || "").toLowerCase().includes(term)
+                      );
+                      const byName = products.filter((p) =>
+                        String(p.name || "").toLowerCase().includes(term)
+                      );
+                      const matches = byCode.length ? byCode : byName;
+                      if (matches.length === 0) return;
+                      setSearchOpen(true);
+                      setSearchIndex((prev) => {
+                        if (e.key === "ArrowDown") {
+                          return prev < matches.length - 1 ? prev + 1 : 0;
+                        }
+                        return prev > 0 ? prev - 1 : matches.length - 1;
+                      });
                     }
                   }}
                 />
@@ -945,15 +974,21 @@ export default function App() {
                         return <div className="p-3 text-slate-500">Sin resultados</div>;
                       }
 
-                      return matches.slice(0, 8).map((p) => (
+                      return matches.slice(0, 8).map((p, idx) => (
                         <button
                           key={p.id}
                           onClick={() => {
                             addToCart(p);
+                            setSearchIndex(-1);
                             setSearchTerm("");
                             setSearchOpen(false);
                           }}
-                          className="w-full text-left px-4 py-3 hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
+                          className={
+                            "w-full text-left px-4 py-3 border-b border-slate-100 last:border-b-0 " +
+                            (idx === searchIndex
+                              ? "bg-blue-50 outline outline-1 outline-blue-200"
+                              : "hover:bg-slate-50")
+                          }
                         >
                           <div className="font-semibold">{p.name}</div>
                           <div className="text-xs text-slate-500">
