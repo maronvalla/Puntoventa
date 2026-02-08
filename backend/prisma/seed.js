@@ -11,6 +11,19 @@ async function main() {
   const password = process.env.ADMIN_PASSWORD || "admin";
   const name = process.env.ADMIN_NAME || "Administrador";
   const email = `${username}@pos.local`;
+  const resetUsers =
+    String(process.env.SEED_RESET_USERS || "")
+      .trim()
+      .toLowerCase() === "true";
+
+  const existingAdmin = await prisma.user.findFirst({
+    where: { role: "ADMIN", active: true },
+  });
+
+  if (existingAdmin && !resetUsers) {
+    console.log("✓ Admin ya existe, seed no modifica usuarios");
+    return;
+  }
 
   const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -44,14 +57,16 @@ async function main() {
         },
       });
 
-  await prisma.user.updateMany({
-    where: { id: { not: admin.id } },
-    data: { active: false },
-  });
+  if (resetUsers) {
+    await prisma.user.updateMany({
+      where: { id: { not: admin.id } },
+      data: { active: false },
+    });
+    console.log("✓ Otros usuarios desactivados");
+  }
 
   console.log(`✓ Admin user: ${admin.username} (${admin.email})`);
   console.log(`  Password: ${password}`);
-  console.log("✓ Otros usuarios desactivados");
 }
 
 main()
