@@ -176,6 +176,16 @@ export default function App() {
     }
   }, [view]);
 
+  // Keep focus when returning to the page
+  useEffect(() => {
+    if (view !== "pos") return;
+    function handleWindowFocus() {
+      searchRef.current?.focus();
+    }
+    window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
+  }, [view]);
+
   // Global keyboard listener for quick sale
   useEffect(() => {
     if (view !== "pos") return;
@@ -868,6 +878,7 @@ export default function App() {
                 <label className="block text-sm font-medium text-slate-700 mb-2">Buscar producto</label>
                 <input
                   ref={searchRef}
+                  autoFocus={view === "pos"}
                   className="w-full p-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 bg-white shadow-sm"
                   placeholder="Buscar por code / nombre / barcode"
                   value={searchTerm}
