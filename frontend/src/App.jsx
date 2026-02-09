@@ -1438,20 +1438,24 @@ export default function App() {
             <h2 className="text-2xl font-semibold text-slate-900 mb-4">Ventas (admin)</h2>
 
             {/* Top Product KPI */}
-            {topProduct && (
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm flex items-center gap-4">
-                <div className="p-3 bg-emerald-100 text-emerald-600 rounded-full">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">Producto más vendido (Histórico)</div>
-                  <div className="text-xl font-bold text-slate-900">{topProduct.name}</div>
-                  <div className="text-sm text-slate-600">{topProduct.qty} unidades vendidas</div>
-                </div>
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm flex items-center gap-4">
+              <div className="p-3 bg-emerald-100 text-emerald-600 rounded-full">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
               </div>
-            )}
+              <div>
+                <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">Producto más vendido (Histórico)</div>
+                {topProduct ? (
+                  <>
+                    <div className="text-xl font-bold text-slate-900">{topProduct.name}</div>
+                    <div className="text-sm text-slate-600">{topProduct.qty} unidades vendidas</div>
+                  </>
+                ) : (
+                  <div className="text-sm text-slate-400 italic">Cargando o sin datos...</div>
+                )}
+              </div>
+            </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1479,12 +1483,6 @@ export default function App() {
                       </option>
                     ))}
                   </select>
-                </div>
-
-                <div className="flex items-end">
-                  <div className="text-sm text-slate-600">
-                    Total ventas (activas): $ {money(salesFiltered.filter((s) => (s.status || "ACTIVE") === "ACTIVE").reduce((a, s) => a + Number(s.total || 0), 0))}
-                  </div>
                 </div>
               </div>
             </div>
