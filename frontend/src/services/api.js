@@ -200,6 +200,10 @@ class ApiService {
     const query = dayKey ? `?dayKey=${dayKey}` : "";
     return this.request(`/reports/daily${query}`);
   }
+
+  async getTopProduct() {
+    return this.request("/reports/top-product");
+  }
 }
 
 export const api = new ApiService();

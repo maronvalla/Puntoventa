@@ -94,6 +94,9 @@ export default function App() {
   const [saleDetail, setSaleDetail] = useState(null);
   const [saleEdit, setSaleEdit] = useState(null);
 
+  // KPI
+  const [topProduct, setTopProduct] = useState(null);
+
   // New user form (admin)
   const [newUser, setNewUser] = useState({
     username: "",
@@ -151,10 +154,15 @@ export default function App() {
         sellerId: isAdmin && salesFilterUser !== "all" ? salesFilterUser : undefined,
       });
       setSales(salesData);
+
+      // Load top product if on sales view
+      if (view === "sales") {
+        api.getTopProduct().then(setTopProduct).catch(console.error);
+      }
     } catch (e) {
       console.error("Error loading sales:", e);
     }
-  }, [user, selectedDayKey, salesFilterUser, isAdmin]);
+  }, [user, selectedDayKey, salesFilterUser, isAdmin, view]);
 
   useEffect(() => {
     loadSales();
@@ -710,9 +718,8 @@ export default function App() {
 
           <label className="block text-sm font-medium text-slate-700 mb-2">Usuario</label>
           <input
-            className={`w-full p-3 border rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-600/30 ${
-              loginErr ? "border-red-400" : "border-slate-200"
-            }`}
+            className={`w-full p-3 border rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-600/30 ${loginErr ? "border-red-400" : "border-slate-200"
+              }`}
             placeholder="ej: exequiel, caja1"
             value={login.username}
             onChange={(e) => setLogin((s) => ({ ...s, username: e.target.value }))}
@@ -720,9 +727,8 @@ export default function App() {
 
           <label className="block text-sm font-medium text-slate-700 mb-2">Contraseña</label>
           <input
-            className={`w-full p-3 border rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-blue-600/30 ${
-              loginErr ? "border-red-400" : "border-slate-200"
-            }`}
+            className={`w-full p-3 border rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-blue-600/30 ${loginErr ? "border-red-400" : "border-slate-200"
+              }`}
             placeholder="••••••••"
             type="password"
             value={login.password}
@@ -1431,6 +1437,22 @@ export default function App() {
           <div className="max-w-6xl">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4">Ventas (admin)</h2>
 
+            {/* Top Product KPI */}
+            {topProduct && (
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm flex items-center gap-4">
+                <div className="p-3 bg-emerald-100 text-emerald-600 rounded-full">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">Producto más vendido (Histórico)</div>
+                  <div className="text-xl font-bold text-slate-900">{topProduct.name}</div>
+                  <div className="text-sm text-slate-600">{topProduct.qty} unidades vendidas</div>
+                </div>
+              </div>
+            )}
+
             <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -1695,6 +1717,8 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
               <div className="font-bold mb-3">Reiniciar admin</div>

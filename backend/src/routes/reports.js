@@ -113,4 +113,33 @@ router.get("/daily", authenticate, async (req, res) => {
   }
 });
 
+router.get("/top-product", authenticate, async (req, res) => {
+  try {
+    const top = await prisma.saleItem.groupBy({
+      by: ["name"],
+      _sum: {
+        qty: true,
+      },
+      orderBy: {
+        _sum: {
+          qty: "desc",
+        },
+      },
+      take: 1,
+    });
+
+    if (top.length === 0) {
+      return res.json(null);
+    }
+
+    res.json({
+      name: top[0].name,
+      qty: top[0]._sum.qty,
+    });
+  } catch (error) {
+    console.error("Top product error:", error);
+    res.status(500).json({ error: "Error al obtener producto más vendido" });
+  }
+});
+
 export default router;
