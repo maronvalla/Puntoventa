@@ -1,11 +1,12 @@
 {
   "name": "pos-pagofacil-backend",
   "version": "1.0.0",
-  "description": "POS Pagofácil Backend API - Railway",
+  "description": "POS Pagof\u00e1cil Backend API - Railway",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
     "dev": "nodemon src/index.js",
+    "build": "echo \"No build step required on Railway\"",
     "start": "node src/index.js",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
