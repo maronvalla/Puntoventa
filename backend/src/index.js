@@ -34,7 +34,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
-
+app.options("*", cors(corsOptions));
 // Health check
 app.get("/", (req, res) => {
   res.json({ status: "ok", message: "POS Pagofácil API" });
