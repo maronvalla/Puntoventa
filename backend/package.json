@@ -8,6 +8,7 @@
     "dev": "nodemon src/index.js",
     "build": "prisma generate",
     "start": "node src/index.js",
+    "db generate": "prisma generate",
     "postinstall": "prisma generate",
     "db:seed": "node prisma/seed.js",
     "db:studio": "prisma studio"
