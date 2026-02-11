@@ -14,7 +14,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS configuration
+// Deployment notes (Railway):
+// - Set DATABASE_URL to Railway's PUBLIC Postgres proxy connection string.
+// - Do not run Prisma migrate/push during the build step.
+
+// CORS configuration (FRONTEND_URLS takes comma-separated values; FRONTEND_URL is fallback)
 const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || "")
   .split(",")
   .map((origin) => origin.trim())
@@ -33,8 +37,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
 app.options("*", cors(corsOptions));
+app.use(express.json());
+
 // Health check
 app.get("/", (req, res) => {
   res.json({ status: "ok", message: "POS Pagofácil API" });
