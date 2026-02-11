@@ -6,12 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "build": "echo \"No build step required on Railway\"",
+    "build": "prisma generate",
     "start": "node src/index.js",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
-    "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "node prisma/seed.js",
     "db:studio": "prisma studio"
   },
