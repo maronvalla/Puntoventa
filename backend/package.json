@@ -11,6 +11,8 @@
     "db generate": "prisma generate",
     "postinstall": "prisma generate",
     "db:seed": "node prisma/seed.js",
+    "db:show-owner": "node scripts/show-owner.js",
+    "db:reset-owner-password": "node scripts/reset-owner-password.js",
     "db:studio": "prisma studio",
     "db:migrate:deploy": "prisma migrate deploy"
   },

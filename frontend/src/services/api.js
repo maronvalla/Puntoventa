@@ -118,8 +118,8 @@ class ApiService {
   }
 
   // Products
-  async getProducts() {
-    return this.request("/products");
+  async getProducts(includeInactive = false) {
+    return this.request(`/products${includeInactive ? "?includeInactive=true" : ""}`);
   }
 
   async createProduct(data) {
@@ -234,6 +234,12 @@ class ApiService {
   async getDailyReport(dayKey) {
     const query = dayKey ? `?dayKey=${dayKey}` : "";
     return this.request(`/reports/daily${query}`);
+  }
+
+  async getReportSummary({ period, year, month }) {
+    const query = new URLSearchParams({ period, year: String(year) });
+    if (period === "month") query.set("month", String(month));
+    return this.request(`/reports/summary?${query.toString()}`);
   }
 
   async getTopProduct() {

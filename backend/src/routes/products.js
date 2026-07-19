@@ -20,10 +20,14 @@ const format = (item) => ({
 
 router.get("/", authenticate, requireBusiness, async (req, res) => {
   try {
+    const includeInactive = req.user.role === "OWNER" && req.query.includeInactive === "true";
     const items = await prisma.businessProduct.findMany({
-      where: { businessId: req.businessId, active: true, product: { active: true } },
+      where: {
+        businessId: req.businessId,
+        ...(includeInactive ? {} : { active: true, product: { active: true } }),
+      },
       include: { product: true },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ active: "desc" }, { createdAt: "desc" }],
     });
     res.json(items.map(format));
   } catch (error) {

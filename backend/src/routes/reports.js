@@ -8,6 +8,71 @@ const dayKeyTucuman = (date = new Date()) => new Intl.DateTimeFormat("en-CA", {
 }).format(date);
 router.use(authenticate, requireBusiness);
 
+router.get("/summary", async (req, res) => {
+  try {
+    if (req.user.role !== "OWNER") return res.status(403).json({ error: "Acceso denegado" });
+    const nowParts = dayKeyTucuman().split("-").map(Number);
+    const period = req.query.period === "year" ? "year" : "month";
+    const year = Number(req.query.year || nowParts[0]);
+    const month = Number(req.query.month || nowParts[1]);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100 || (period === "month" && (!Number.isInteger(month) || month < 1 || month > 12))) {
+      return res.status(400).json({ error: "Período inválido" });
+    }
+
+    const paddedMonth = String(month).padStart(2, "0");
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const from = period === "year" ? `${year}-01-01` : `${year}-${paddedMonth}-01`;
+    const to = period === "year" ? `${year}-12-31` : `${year}-${paddedMonth}-${String(daysInMonth).padStart(2, "0")}`;
+    const sales = await prisma.sale.findMany({
+      where: { businessId: req.businessId, status: "ACTIVE", dayKey: { gte: from, lte: to } },
+      include: { items: true },
+      orderBy: { dayKey: "asc" },
+    });
+
+    let grossSales = 0, cogs = 0, cash = 0, transfer = 0;
+    const productTotals = new Map();
+    const bucketCount = period === "year" ? 12 : daysInMonth;
+    const trend = Array.from({ length: bucketCount }, (_, index) => ({
+      key: index + 1,
+      label: period === "year"
+        ? new Intl.DateTimeFormat("es-AR", { month: "short", timeZone: "UTC" }).format(new Date(Date.UTC(2024, index, 1))).replace(".", "")
+        : String(index + 1),
+      grossSales: 0, profit: 0, transactions: 0,
+    }));
+
+    for (const sale of sales) {
+      const saleTotal = Number(sale.total || 0);
+      const saleCogs = sale.items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.itemCostPrice || 0), 0);
+      grossSales += saleTotal; cogs += saleCogs;
+      cash += Number(sale.cashAmount || 0); transfer += Number(sale.transferAmount || 0);
+      const bucket = period === "year" ? Number(sale.dayKey.slice(5, 7)) - 1 : Number(sale.dayKey.slice(8, 10)) - 1;
+      if (trend[bucket]) {
+        trend[bucket].grossSales += saleTotal;
+        trend[bucket].profit += saleTotal - saleCogs;
+        trend[bucket].transactions += 1;
+      }
+      for (const item of sale.items) {
+        const current = productTotals.get(item.name) || { name: item.name, qty: 0, revenue: 0 };
+        current.qty += Number(item.qty || 0);
+        current.revenue += Number(item.lineTotal || Number(item.qty || 0) * Number(item.unitPrice || 0));
+        productTotals.set(item.name, current);
+      }
+    }
+
+    const profit = grossSales - cogs;
+    const topProducts = [...productTotals.values()].sort((a, b) => b.qty - a.qty || b.revenue - a.revenue).slice(0, 5);
+    res.json({
+      period, year, month: period === "month" ? month : null, from, to,
+      grossSales, cogs, profit, marginPercent: grossSales ? (profit / grossSales) * 100 : 0,
+      transactions: sales.length, averageTicket: sales.length ? grossSales / sales.length : 0,
+      paymentTotals: { cash, transfer }, trend, topProduct: topProducts[0] || null, topProducts,
+    });
+  } catch (error) {
+    console.error("Summary report error:", error);
+    res.status(500).json({ error: "Error al generar el reporte del período" });
+  }
+});
+
 router.get("/daily", async (req, res) => {
   try {
     const isOwner = req.user.role === "OWNER";
