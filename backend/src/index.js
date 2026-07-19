@@ -8,6 +8,8 @@ import salesRoutes from "./routes/sales.js";
 import usersRoutes from "./routes/users.js";
 import purchasesRoutes from "./routes/purchases.js";
 import reportsRoutes from "./routes/reports.js";
+import businessesRoutes from "./routes/businesses.js";
+import catalogRoutes from "./routes/catalog.js";
 
 dotenv.config();
 
@@ -33,7 +35,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Business-Id"],
 };
 
 app.use(cors(corsOptions));
@@ -56,6 +58,8 @@ app.use("/api/sales", salesRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/purchases", purchasesRoutes);
 app.use("/api/reports", reportsRoutes);
+app.use("/api/businesses", businessesRoutes);
+app.use("/api/catalog", catalogRoutes);
 
 // Error handler
 app.use((err, req, res, next) => {

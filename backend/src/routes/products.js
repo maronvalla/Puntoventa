@@ -1,226 +1,154 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticate, requireAdmin } from "../middleware/auth.js";
+import { authenticate, requireBusiness, requireOwner } from "../middleware/auth.js";
 
 const router = Router();
+const format = (item) => ({
+  id: item.id,
+  productId: item.productId,
+  name: item.product.name,
+  code: item.product.code,
+  barcode: item.product.barcode,
+  catalogActive: item.product.active,
+  price: Number(item.price),
+  costPrice: Number(item.costPrice),
+  stock: item.stock,
+  active: item.active,
+  createdAt: item.createdAt,
+  updatedAt: item.updatedAt,
+});
 
-// GET /api/products - List all active products
-router.get("/", authenticate, async (req, res) => {
+router.get("/", authenticate, requireBusiness, async (req, res) => {
   try {
-    const products = await prisma.product.findMany({
-      where: { active: true },
+    const items = await prisma.businessProduct.findMany({
+      where: { businessId: req.businessId, active: true, product: { active: true } },
+      include: { product: true },
       orderBy: { createdAt: "desc" },
     });
-
-    // Convert Decimal to number for JSON
-    const formattedProducts = products.map((p) => ({
-      ...p,
-      price: Number(p.price),
-      costPrice: Number(p.costPrice),
-    }));
-
-    res.json(formattedProducts);
+    res.json(items.map(format));
   } catch (error) {
     console.error("Get products error:", error);
     res.status(500).json({ error: "Error al obtener productos" });
   }
 });
 
-// GET /api/products/:id
-router.get("/:id", authenticate, async (req, res) => {
+router.get("/:id", authenticate, requireBusiness, async (req, res) => {
   try {
-    const product = await prisma.product.findUnique({
-      where: { id: req.params.id },
+    const item = await prisma.businessProduct.findFirst({
+      where: { id: req.params.id, businessId: req.businessId },
+      include: { product: true },
     });
-
-    if (!product) {
-      return res.status(404).json({ error: "Producto no encontrado" });
-    }
-
-    res.json({
-      ...product,
-      price: Number(product.price),
-      costPrice: Number(product.costPrice),
-    });
+    if (!item) return res.status(404).json({ error: "Producto no encontrado" });
+    res.json(format(item));
   } catch (error) {
-    console.error("Get product error:", error);
     res.status(500).json({ error: "Error al obtener producto" });
   }
 });
 
-// POST /api/products - Create product (admin only)
-router.post("/", authenticate, requireAdmin, async (req, res) => {
+router.post("/", authenticate, requireOwner, requireBusiness, async (req, res) => {
   try {
-    const { name, price, costPrice, barcode, code, stock } = req.body;
+    const { productId, name, code, barcode, price, costPrice, stock } = req.body;
+    if (price == null || costPrice == null || stock == null) {
+      return res.status(400).json({ error: "Precio, costo y stock requeridos" });
+    }
+    if (![price, costPrice, stock].every((value) => Number.isFinite(Number(value))) || Number(price) < 0 || Number(costPrice) < 0) {
+      return res.status(400).json({ error: "Precio, costo o stock inválidos" });
+    }
 
-    if (!name || price == null || costPrice == null || !code || stock == null) {
-      return res.status(400).json({
-        error: "Falta nombre / precio / costo / code / stock",
+    const item = await prisma.$transaction(async (tx) => {
+      let catalogId = productId;
+      if (!catalogId) {
+        const cleanName = String(name || "").trim();
+        const cleanCode = String(code || "").trim().toLowerCase();
+        if (!cleanName || !cleanCode) throw new Error("Nombre y código requeridos");
+        const catalog = await tx.product.create({
+          data: { name: cleanName, code: cleanCode, barcode: String(barcode || "").trim() || null },
+        });
+        catalogId = catalog.id;
+      }
+
+      const catalog = await tx.product.findFirst({ where: { id: catalogId, active: true } });
+      if (!catalog) throw new Error("Producto de catálogo no encontrado");
+      return tx.businessProduct.create({
+        data: {
+          businessId: req.businessId,
+          productId: catalogId,
+          price: Number(price),
+          costPrice: Number(costPrice),
+          stock: Number(stock),
+        },
+        include: { product: true },
       });
-    }
-
-    if (Number(price) < 0 || Number(costPrice) < 0) {
-      return res.status(400).json({ error: "Precio/costo inválidos" });
-    }
-
-    // Check code uniqueness
-    const existing = await prisma.product.findUnique({
-      where: { code: code.toLowerCase() },
     });
-
-    if (existing) {
-      return res.status(400).json({ error: "El code ya existe" });
-    }
-
-    const product = await prisma.product.create({
-      data: {
-        name: name.trim(),
-        price: Number(price),
-        costPrice: Number(costPrice),
-        barcode: barcode?.trim() || null,
-        code: code.toLowerCase().trim(),
-        stock: Number(stock),
-      },
-    });
-
-    res.status(201).json({
-      ...product,
-      price: Number(product.price),
-      costPrice: Number(product.costPrice),
-    });
+    res.status(201).json(format(item));
   } catch (error) {
-    console.error("Create product error:", error);
-    res.status(500).json({ error: "Error al crear producto" });
+    if (error.code === "P2002") return res.status(400).json({ error: "El producto ya existe en el catálogo o negocio" });
+    console.error("Create business product error:", error);
+    res.status(400).json({ error: error.message || "Error al crear producto" });
   }
 });
 
-// PATCH /api/products/:id - Update product (admin only)
-router.patch("/:id", authenticate, requireAdmin, async (req, res) => {
+router.patch("/:id", authenticate, requireOwner, requireBusiness, async (req, res) => {
   try {
-    const { price, costPrice, name, barcode, code, stock, active } = req.body;
-    const updateData = {};
-
-    if (price != null) {
-      if (Number(price) < 0) {
-        return res.status(400).json({ error: "Precio inválido" });
+    const existing = await prisma.businessProduct.findFirst({ where: { id: req.params.id, businessId: req.businessId } });
+    if (!existing) return res.status(404).json({ error: "Producto no encontrado" });
+    const data = {};
+    for (const field of ["price", "costPrice"]) {
+      if (req.body[field] != null) {
+        const value = Number(req.body[field]);
+        if (!Number.isFinite(value) || value < 0) return res.status(400).json({ error: "Precio o costo inválido" });
+        data[field] = value;
       }
-      updateData.price = Number(price);
     }
-
-    if (costPrice != null) {
-      if (Number(costPrice) < 0) {
-        return res.status(400).json({ error: "Costo inválido" });
-      }
-      updateData.costPrice = Number(costPrice);
+    if (req.body.stock != null) {
+      const stock = Number(req.body.stock);
+      if (!Number.isFinite(stock)) return res.status(400).json({ error: "Stock inválido" });
+      data.stock = stock;
     }
-
-    if (name != null) updateData.name = name.trim();
-    if (barcode != null) updateData.barcode = barcode.trim() || null;
-
-    if (code != null) {
-      // Check code uniqueness
-      const existing = await prisma.product.findFirst({
-        where: {
-          code: code.toLowerCase(),
-          NOT: { id: req.params.id },
-        },
-      });
-      if (existing) {
-        return res.status(400).json({ error: "El code ya existe" });
-      }
-      updateData.code = code.toLowerCase().trim();
-    }
-
-    if (stock != null) updateData.stock = Number(stock);
-    if (active != null) updateData.active = Boolean(active);
-
-    const product = await prisma.product.update({
-      where: { id: req.params.id },
-      data: updateData,
-    });
-
-    res.json({
-      ...product,
-      price: Number(product.price),
-      costPrice: Number(product.costPrice),
-    });
+    if (req.body.active != null) data.active = Boolean(req.body.active);
+    const item = await prisma.businessProduct.update({ where: { id: existing.id }, data, include: { product: true } });
+    res.json(format(item));
   } catch (error) {
     console.error("Update product error:", error);
-    if (error.code === "P2025") {
-      return res.status(404).json({ error: "Producto no encontrado" });
-    }
     res.status(500).json({ error: "Error al actualizar producto" });
   }
 });
 
-// POST /api/products/:id/adjust-stock - Adjust stock with reason (admin only)
-router.post("/:id/adjust-stock", authenticate, requireAdmin, async (req, res) => {
+router.post("/:id/adjust-stock", authenticate, requireOwner, requireBusiness, async (req, res) => {
   try {
-    const { delta, reason } = req.body;
-
-    if (!Number.isFinite(Number(delta)) || Number(delta) === 0) {
-      return res.status(400).json({ error: "Delta inválido" });
-    }
-
-    if (!reason || !reason.trim()) {
-      return res.status(400).json({ error: "Motivo requerido" });
-    }
+    const delta = Number(req.body.delta);
+    const reason = String(req.body.reason || "").trim();
+    if (!Number.isFinite(delta) || delta === 0) return res.status(400).json({ error: "Delta inválido" });
+    if (!reason) return res.status(400).json({ error: "Motivo requerido" });
 
     const result = await prisma.$transaction(async (tx) => {
-      const product = await tx.product.findUnique({
-        where: { id: req.params.id },
+      const existing = await tx.businessProduct.findFirst({ where: { id: req.params.id, businessId: req.businessId } });
+      if (!existing) throw new Error("Producto no encontrado");
+      const item = await tx.businessProduct.update({
+        where: { id: existing.id }, data: { stock: { increment: delta } }, include: { product: true },
       });
-
-      if (!product) {
-        throw new Error("Producto no encontrado");
-      }
-
-      const newStock = product.stock + Number(delta);
-
-      const updatedProduct = await tx.product.update({
-        where: { id: req.params.id },
-        data: { stock: newStock },
-      });
-
-      const adjustment = await tx.stockAdjustment.create({
-        data: {
-          productId: req.params.id,
-          delta: Number(delta),
-          reason: reason.trim(),
-          adminId: req.user.id,
-          adminName: req.user.name,
-        },
-      });
-
-      return { product: updatedProduct, adjustment };
+      await tx.stockAdjustment.create({ data: {
+        businessId: req.businessId, businessProductId: existing.id, delta, reason,
+        adminId: req.user.id, adminName: req.user.name,
+      } });
+      return item;
     });
-
-    res.json({
-      ...result.product,
-      price: Number(result.product.price),
-      costPrice: Number(result.product.costPrice),
-    });
+    res.json(format(result));
   } catch (error) {
     console.error("Adjust stock error:", error);
-    res.status(500).json({ error: error.message || "Error al ajustar stock" });
+    res.status(400).json({ error: error.message || "Error al ajustar stock" });
   }
 });
 
-// DELETE /api/products/:id - Soft delete product (admin only)
-router.delete("/:id", authenticate, requireAdmin, async (req, res) => {
+router.delete("/:id", authenticate, requireOwner, requireBusiness, async (req, res) => {
   try {
-    await prisma.product.update({
-      where: { id: req.params.id },
-      data: { active: false },
+    const result = await prisma.businessProduct.updateMany({
+      where: { id: req.params.id, businessId: req.businessId }, data: { active: false },
     });
-
-    res.json({ message: "Producto eliminado" });
+    if (!result.count) return res.status(404).json({ error: "Producto no encontrado" });
+    res.json({ message: "Producto desactivado en este negocio" });
   } catch (error) {
-    console.error("Delete product error:", error);
-    if (error.code === "P2025") {
-      return res.status(404).json({ error: "Producto no encontrado" });
-    }
-    res.status(500).json({ error: "Error al eliminar producto" });
+    res.status(500).json({ error: "Error al desactivar producto" });
   }
 });
 

@@ -3,77 +3,33 @@ import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 
 dotenv.config();
-
 const prisma = new PrismaClient();
 
 async function main() {
-  const username = process.env.ADMIN_USERNAME || "admin";
-  const password = process.env.ADMIN_PASSWORD || "admin";
-  const name = process.env.ADMIN_NAME || "Administrador";
-  const email = `${username}@pos.local`;
-  const resetUsers =
-    String(process.env.SEED_RESET_USERS || "")
-      .trim()
-      .toLowerCase() === "true";
-
-  const existingAdmin = await prisma.user.findFirst({
-    where: { role: "ADMIN", active: true },
-  });
-
-  if (existingAdmin && !resetUsers) {
-    console.log("✓ Admin ya existe, seed no modifica usuarios");
+  const existingOwner = await prisma.user.findFirst({ where: { role: "OWNER" } });
+  if (existingOwner) {
+    if (!existingOwner.active) {
+      await prisma.user.update({ where: { id: existingOwner.id }, data: { active: true, businessId: null } });
+    }
+    console.log(`✓ Dueño ya existe: ${existingOwner.username}`);
     return;
   }
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  const existingByUsername = await prisma.user.findUnique({
-    where: { username },
+  const username = String(process.env.ADMIN_USERNAME || "admin").trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || "admin";
+  const name = process.env.ADMIN_NAME || "Administrador";
+  const email = `${username}@pos.local`;
+  await prisma.business.upsert({
+    where: { id: "business-main" }, update: {},
+    create: { id: "business-main", name: "Negocio principal", address: "" },
   });
-  const existingByEmail = existingByUsername
-    ? null
-    : await prisma.user.findUnique({ where: { email } });
-
-  const admin = existingByUsername || existingByEmail
-    ? await prisma.user.update({
-        where: { id: (existingByUsername || existingByEmail).id },
-        data: {
-          username,
-          email,
-          password: hashedPassword,
-          name,
-          role: "ADMIN",
-          active: true,
-        },
-      })
-    : await prisma.user.create({
-        data: {
-          username,
-          email,
-          password: hashedPassword,
-          name,
-          role: "ADMIN",
-          active: true,
-        },
-      });
-
-  if (resetUsers) {
-    await prisma.user.updateMany({
-      where: { id: { not: admin.id } },
-      data: { active: false },
-    });
-    console.log("✓ Otros usuarios desactivados");
-  }
-
-  console.log(`✓ Admin user: ${admin.username} (${admin.email})`);
-  console.log(`  Password: ${password}`);
+  const existing = await prisma.user.findFirst({ where: { OR: [{ username }, { email }] } });
+  const data = { username, email, password: await bcrypt.hash(password, 10), name, role: "OWNER", active: true, businessId: null };
+  const owner = existing
+    ? await prisma.user.update({ where: { id: existing.id }, data })
+    : await prisma.user.create({ data });
+  console.log(`✓ Dueño creado: ${owner.username}`);
 }
 
-main()
-  .catch((e) => {
-    console.error("Seed error:", e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+main().catch((error) => { console.error("Seed error:", error); process.exit(1); })
+  .finally(async () => prisma.$disconnect());

@@ -1,241 +1,87 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import prisma from "../db.js";
-import { authenticate, requireAdmin } from "../middleware/auth.js";
+import { authenticate, requireBusiness, requireOwner } from "../middleware/auth.js";
 
 const router = Router();
+const publicFields = { id: true, username: true, email: true, name: true, role: true, active: true, businessId: true, createdAt: true };
+router.use(authenticate, requireOwner, requireBusiness);
 
-// GET /api/users - List all users
-router.get("/", authenticate, async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const users = await prisma.user.findMany({
-      where: { active: true },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        name: true,
-        role: true,
-        createdAt: true,
-      },
-      orderBy: { name: "asc" },
-    });
-
-    res.json(users);
+    res.json(await prisma.user.findMany({
+      where: { businessId: req.businessId, role: "CASHIER" },
+      select: publicFields,
+      orderBy: [{ active: "desc" }, { name: "asc" }],
+    }));
   } catch (error) {
-    console.error("Get users error:", error);
-    res.status(500).json({ error: "Error al obtener usuarios" });
+    res.status(500).json({ error: "Error al obtener empleados" });
   }
 });
 
-// POST /api/users - Create cashier (admin only)
-router.post("/", authenticate, requireAdmin, async (req, res) => {
+router.post("/", async (req, res) => {
   try {
-    const { username, password, name, role } = req.body;
-
-    if (!username || !password || !name) {
-      return res.status(400).json({ error: "Usuario, contraseña y nombre requeridos" });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
-    }
-
-    const usernameClean = username.toLowerCase().trim();
-    const email = `${usernameClean}@pos.local`;
-    const roleNormalized = role === "ADMIN" ? "ADMIN" : "CASHIER";
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Check if username exists
-    const existing = await prisma.user.findFirst({
-      where: {
-        OR: [{ username: usernameClean }, { email }],
-      },
-    });
-
-    if (existing) {
-      if (existing.active) {
-        return res.status(400).json({ error: "El usuario ya existe" });
-      }
-
-      const reactivated = await prisma.user.update({
-        where: { id: existing.id },
-        data: {
-          username: usernameClean,
-          email,
-          password: hashedPassword,
-          name: name.trim(),
-          role: roleNormalized,
-          active: true,
-        },
-        select: {
-          id: true,
-          username: true,
-          email: true,
-          name: true,
-          role: true,
-          createdAt: true,
-        },
-      });
-
-      return res.status(200).json(reactivated);
-    }
-    const user = await prisma.user.create({
-      data: {
-        username: usernameClean,
-        email,
-        password: hashedPassword,
-        name: name.trim(),
-        role: roleNormalized,
-      },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        name: true,
-        role: true,
-        createdAt: true,
-      },
-    });
-
-    res.status(201).json(user);
+    const username = String(req.body.username || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+    const name = String(req.body.name || "").trim();
+    if (!username || !password || !name) return res.status(400).json({ error: "Usuario, contraseña y nombre requeridos" });
+    if (password.length < 6) return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
+    const email = `${username}@pos.local`;
+    const existing = await prisma.user.findFirst({ where: { OR: [{ username }, { email }] } });
+    if (existing?.active) return res.status(400).json({ error: "El usuario ya existe" });
+    const data = {
+      username, email, password: await bcrypt.hash(password, 10), name,
+      role: "CASHIER", businessId: req.businessId, active: true,
+    };
+    const user = existing
+      ? await prisma.user.update({ where: { id: existing.id }, data, select: publicFields })
+      : await prisma.user.create({ data, select: publicFields });
+    res.status(existing ? 200 : 201).json(user);
   } catch (error) {
-    console.error("Create user error:", error);
-    res.status(500).json({ error: "Error al crear usuario" });
+    if (error.code === "P2002") return res.status(400).json({ error: "El usuario ya existe" });
+    console.error("Create employee error:", error);
+    res.status(500).json({ error: "Error al crear empleado" });
   }
 });
 
-// POST /api/users/reset-admin - Reset to a single admin (admin only)
-router.post("/reset-admin", authenticate, requireAdmin, async (req, res) => {
+router.patch("/:id", async (req, res) => {
   try {
-    const { username, password, name } = req.body;
-
-    if (!username || !password || !name) {
-      return res.status(400).json({ error: "Usuario, contraseña y nombre requeridos" });
+    const existing = await prisma.user.findFirst({ where: { id: req.params.id, role: "CASHIER" } });
+    if (!existing) return res.status(404).json({ error: "Empleado no encontrado" });
+    const data = {};
+    if (req.body.name != null) {
+      const name = String(req.body.name).trim();
+      if (!name) return res.status(400).json({ error: "Nombre requerido" });
+      data.name = name;
     }
-
-    if (password.length < 6) {
-      return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
+    if (req.body.password) {
+      if (String(req.body.password).length < 6) return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
+      data.password = await bcrypt.hash(String(req.body.password), 10);
     }
-
-    const usernameClean = username.toLowerCase().trim();
-    const email = `${usernameClean}@pos.local`;
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const result = await prisma.$transaction(async (tx) => {
-      const existingByUsername = await tx.user.findUnique({
-        where: { username: usernameClean },
-      });
-
-      const existingByEmail = existingByUsername
-        ? null
-        : await tx.user.findUnique({ where: { email } });
-
-      const adminUser = existingByUsername || existingByEmail;
-
-      const admin = adminUser
-        ? await tx.user.update({
-            where: { id: adminUser.id },
-            data: {
-              username: usernameClean,
-              email,
-              password: hashedPassword,
-              name: name.trim(),
-              role: "ADMIN",
-              active: true,
-            },
-          })
-        : await tx.user.create({
-            data: {
-              username: usernameClean,
-              email,
-              password: hashedPassword,
-              name: name.trim(),
-              role: "ADMIN",
-              active: true,
-            },
-          });
-
-      await tx.user.updateMany({
-        where: { id: { not: admin.id } },
-        data: { active: false },
-      });
-
-      return admin;
-    });
-
-    res.json({
-      id: result.id,
-      username: result.username,
-      email: result.email,
-      name: result.name,
-      role: result.role,
-    });
+    if (req.body.active != null) data.active = Boolean(req.body.active);
+    if (req.body.businessId != null) {
+      const target = await prisma.business.findFirst({ where: { id: String(req.body.businessId), active: true } });
+      if (!target) return res.status(400).json({ error: "Negocio destino inválido" });
+      data.businessId = target.id;
+    } else if (existing.businessId !== req.businessId) {
+      return res.status(404).json({ error: "Empleado no encontrado en este negocio" });
+    }
+    res.json(await prisma.user.update({ where: { id: existing.id }, data, select: publicFields }));
   } catch (error) {
-    console.error("Reset admin error:", error);
-    res.status(500).json({ error: "Error al reiniciar admin" });
+    console.error("Update employee error:", error);
+    res.status(500).json({ error: "Error al actualizar empleado" });
   }
 });
 
-// PATCH /api/users/:id - Update user (admin only)
-router.patch("/:id", authenticate, requireAdmin, async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
-    const { name, password, role } = req.body;
-    const updateData = {};
-
-    if (name) updateData.name = name.trim();
-    if (role && ["ADMIN", "CASHIER"].includes(role)) updateData.role = role;
-
-    if (password) {
-      if (password.length < 6) {
-        return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres" });
-      }
-      updateData.password = await bcrypt.hash(password, 10);
-    }
-
-    const user = await prisma.user.update({
-      where: { id: req.params.id },
-      data: updateData,
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        name: true,
-        role: true,
-        createdAt: true,
-      },
+    const result = await prisma.user.updateMany({
+      where: { id: req.params.id, businessId: req.businessId, role: "CASHIER" }, data: { active: false },
     });
-
-    res.json(user);
+    if (!result.count) return res.status(404).json({ error: "Empleado no encontrado" });
+    res.json({ message: "Empleado desactivado" });
   } catch (error) {
-    console.error("Update user error:", error);
-    if (error.code === "P2025") {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
-    res.status(500).json({ error: "Error al actualizar usuario" });
-  }
-});
-
-// DELETE /api/users/:id - Deactivate user (admin only)
-router.delete("/:id", authenticate, requireAdmin, async (req, res) => {
-  try {
-    // Prevent self-deletion
-    if (req.params.id === req.user.id) {
-      return res.status(400).json({ error: "No podés eliminarte a vos mismo" });
-    }
-
-    await prisma.user.update({
-      where: { id: req.params.id },
-      data: { active: false },
-    });
-
-    res.json({ message: "Usuario desactivado" });
-  } catch (error) {
-    console.error("Delete user error:", error);
-    if (error.code === "P2025") {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
-    res.status(500).json({ error: "Error al eliminar usuario" });
+    res.status(500).json({ error: "Error al desactivar empleado" });
   }
 });
 

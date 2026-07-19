@@ -6,66 +6,32 @@ import { authenticate } from "../middleware/auth.js";
 
 const router = Router();
 
-// POST /api/auth/login
 router.post("/login", async (req, res) => {
   try {
-    const { username, password } = req.body;
-
-    if (!username || !password) {
-      return res.status(400).json({ error: "Usuario y contraseña requeridos" });
-    }
-
-    // Find user by username or email
+    const login = String(req.body.username || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+    if (!login || !password) return res.status(400).json({ error: "Usuario y contraseña requeridos" });
     const user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { username: username.toLowerCase() },
-          { email: username.toLowerCase() },
-        ],
-        active: true,
-      },
+      where: { OR: [{ username: login }, { email: login }], active: true }, include: { business: true },
     });
-
-    if (!user) {
+    if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
     }
-
-    const validPassword = await bcrypt.compare(password, user.password);
-
-    if (!validPassword) {
-      return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
+    if (user.role === "CASHIER" && (!user.business || !user.business.active)) {
+      return res.status(403).json({ error: "El negocio asignado está desactivado" });
     }
-
-    const token = jwt.sign(
-      { userId: user.id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
-    );
-
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-      },
-    });
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || "7d" });
+    res.json({ token, user: {
+      id: user.id, username: user.username, email: user.email, name: user.name,
+      role: user.role, businessId: user.businessId, business: user.business,
+    } });
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({ error: "Error al iniciar sesión" });
   }
 });
 
-// GET /api/auth/me - Get current user
-router.get("/me", authenticate, async (req, res) => {
-  res.json({ user: req.user });
-});
-
-// POST /api/auth/logout - Just for client-side token invalidation info
-router.post("/logout", authenticate, (req, res) => {
-  res.json({ message: "Sesión cerrada" });
-});
+router.get("/me", authenticate, (req, res) => res.json({ user: req.user }));
+router.post("/logout", authenticate, (_req, res) => res.json({ message: "Sesión cerrada" }));
 
 export default router;

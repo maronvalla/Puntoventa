@@ -38,9 +38,17 @@ export default function App() {
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
   const [profiles, setProfiles] = useState([]);
+  const [businesses, setBusinesses] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const [activeBusinessId, setActiveBusinessId] = useState(api.getBusinessId() || "");
+  const [newBusiness, setNewBusiness] = useState({ name: "", address: "" });
+  const [catalogSelection, setCatalogSelection] = useState({ productId: "", price: "", costPrice: "", stock: "" });
 
   // Role
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "OWNER";
+  const activeBusiness = isAdmin
+    ? businesses.find((business) => business.id === activeBusinessId)
+    : user?.business;
 
   // UI
   const [view, setView] = useState("pos");
@@ -104,12 +112,6 @@ export default function App() {
     name: "",
     role: "CASHIER",
   });
-  const [resetAdminForm, setResetAdminForm] = useState({
-    username: "",
-    password: "",
-    name: "",
-  });
-
   // Check auth on mount
   useEffect(() => {
     async function checkAuth() {
@@ -117,6 +119,10 @@ export default function App() {
         try {
           const { user } = await api.getMe();
           setUser(user);
+          if (user.role === "CASHIER" && user.businessId) {
+            api.setBusinessId(user.businessId);
+            setActiveBusinessId(user.businessId);
+          }
         } catch (e) {
           api.setToken(null);
         }
@@ -126,20 +132,48 @@ export default function App() {
     checkAuth();
   }, []);
 
+  const loadBusinesses = useCallback(async () => {
+    if (!user || user.role !== "OWNER") return;
+    try {
+      const data = await api.getBusinesses();
+      setBusinesses(data);
+      const active = data.filter((business) => business.active);
+      const selected = active.find((business) => business.id === api.getBusinessId()) || active[0];
+      if (selected && selected.id !== api.getBusinessId()) {
+        api.setBusinessId(selected.id);
+        setActiveBusinessId(selected.id);
+      } else if (!selected) {
+        api.setBusinessId(null);
+        setActiveBusinessId("");
+        setView("businesses");
+      } else {
+        setActiveBusinessId(selected.id);
+      }
+    } catch (e) {
+      console.error("Error loading businesses:", e);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    loadBusinesses();
+  }, [loadBusinesses]);
+
   // Load data when authenticated
   const loadData = useCallback(async () => {
-    if (!user) return;
+    if (!user || !activeBusinessId) return;
     try {
-      const [productsData, usersData] = await Promise.all([
+      const [productsData, usersData, catalogData] = await Promise.all([
         api.getProducts(),
-        api.getUsers(),
+        isAdmin ? api.getUsers() : Promise.resolve([]),
+        isAdmin ? api.getCatalog() : Promise.resolve([]),
       ]);
       setProducts(productsData);
       setProfiles(usersData);
+      setCatalog(catalogData);
     } catch (e) {
       console.error("Error loading data:", e);
     }
-  }, [user]);
+  }, [user, activeBusinessId, isAdmin]);
 
   useEffect(() => {
     loadData();
@@ -147,7 +181,7 @@ export default function App() {
 
   // Load sales when day or filter changes
   const loadSales = useCallback(async () => {
-    if (!user) return;
+    if (!user || !activeBusinessId) return;
     try {
       const salesData = await api.getSales({
         dayKey: selectedDayKey,
@@ -162,7 +196,7 @@ export default function App() {
     } catch (e) {
       console.error("Error loading sales:", e);
     }
-  }, [user, selectedDayKey, salesFilterUser, isAdmin, view]);
+  }, [user, activeBusinessId, selectedDayKey, salesFilterUser, isAdmin, view]);
 
   useEffect(() => {
     loadSales();
@@ -266,6 +300,10 @@ export default function App() {
     try {
       const { user: userData } = await api.login(username, password);
       setUser(userData);
+      if (userData.role === "CASHIER" && userData.businessId) {
+        api.setBusinessId(userData.businessId);
+        setActiveBusinessId(userData.businessId);
+      }
       setLogin({ username: "", password: "" });
       setLoginErr("");
       setView("pos");
@@ -281,7 +319,64 @@ export default function App() {
     setProducts([]);
     setSales([]);
     setProfiles([]);
+    setBusinesses([]);
+    setCatalog([]);
     setView("pos");
+  }
+
+  function switchBusiness(businessId) {
+    api.setBusinessId(businessId);
+    setActiveBusinessId(businessId);
+    setCart([]);
+    setProducts([]);
+    setSales([]);
+    setProfiles([]);
+    setPurchaseItems([]);
+    setSaleDetail(null);
+    setSaleEdit(null);
+    setStockAdjust({});
+  }
+
+  async function createBusiness() {
+    if (!isAdmin || !newBusiness.name.trim()) return;
+    try {
+      const created = await api.createBusiness(newBusiness);
+      setNewBusiness({ name: "", address: "" });
+      await loadBusinesses();
+      switchBusiness(created.id);
+      alert("Negocio creado");
+    } catch (e) {
+      alert(e.message || "No se pudo crear el negocio");
+    }
+  }
+
+  async function editBusiness(business) {
+    const name = prompt("Nombre del negocio:", business.name);
+    if (name == null || !name.trim()) return;
+    const address = prompt("Dirección:", business.address || "");
+    if (address == null) return;
+    try {
+      await api.updateBusiness(business.id, { name: name.trim(), address: address.trim() });
+      loadBusinesses();
+    } catch (e) {
+      alert(e.message || "No se pudo actualizar el negocio");
+    }
+  }
+
+  async function toggleBusiness(business) {
+    const action = business.active ? "desactivar" : "reactivar";
+    if (!confirm(`¿Querés ${action} ${business.name}?`)) return;
+    try {
+      await api.updateBusiness(business.id, { active: !business.active });
+      if (business.id === activeBusinessId && business.active) {
+        api.setBusinessId(null);
+        setActiveBusinessId("");
+        setView("businesses");
+      }
+      await loadBusinesses();
+    } catch (e) {
+      alert(e.message || `No se pudo ${action} el negocio`);
+    }
   }
 
   // POS helpers
@@ -382,6 +477,38 @@ export default function App() {
       loadData();
     } catch (e) {
       alert(e.message || "Error al crear producto");
+    }
+  }
+
+  async function addCatalogProductToBusiness() {
+    const price = Number(catalogSelection.price);
+    const costPrice = Number(catalogSelection.costPrice);
+    const stock = Number(catalogSelection.stock);
+    if (!catalogSelection.productId || ![price, costPrice, stock].every(Number.isFinite)) {
+      alert("Seleccioná producto, precio, costo y stock.");
+      return;
+    }
+    try {
+      await api.createProduct({ productId: catalogSelection.productId, price, costPrice, stock });
+      setCatalogSelection({ productId: "", price: "", costPrice: "", stock: "" });
+      loadData();
+    } catch (e) {
+      alert(e.message || "No se pudo agregar el producto");
+    }
+  }
+
+  async function editCatalogProduct(product) {
+    const name = prompt("Nombre global:", product.name);
+    if (name == null || !name.trim()) return;
+    const code = prompt("Código global:", product.code || "");
+    if (code == null || !code.trim()) return;
+    const barcode = prompt("Código de barras:", product.barcode || "");
+    if (barcode == null) return;
+    try {
+      await api.updateCatalogProduct(product.productId, { name: name.trim(), code: code.trim(), barcode: barcode.trim() });
+      loadData();
+    } catch (e) {
+      alert(e.message || "No se pudo editar el catálogo");
     }
   }
 
@@ -683,18 +810,40 @@ export default function App() {
     }
   }
 
+  async function toggleUserActive(employee) {
+    try {
+      await api.updateUser(employee.id, { active: !employee.active });
+      loadData();
+    } catch (e) {
+      alert(e.message || "No se pudo actualizar el empleado");
+    }
+  }
+
+  async function moveUser(employee, businessId) {
+    if (!businessId || businessId === employee.businessId) return;
+    if (!confirm("¿Mover este empleado al negocio seleccionado?")) return;
+    try {
+      await api.updateUser(employee.id, { businessId });
+      loadData();
+    } catch (e) {
+      alert(e.message || "No se pudo reasignar el empleado");
+    }
+  }
+
   const viewTitle =
     view === "pos"
       ? "Punto de Venta"
       : view === "inventory"
         ? "Inventario"
         : view === "users"
-          ? "Usuarios"
+          ? "Empleados"
           : view === "purchases"
             ? "Compras"
             : view === "sales"
               ? "Ventas"
-              : "Reporte Diario";
+              : view === "businesses"
+                ? "Negocios"
+                : "Reporte Diario";
 
   // Loading state
   if (authLoading) {
@@ -782,6 +931,21 @@ export default function App() {
           Sesión: <b>{user.name || user.email}</b> {isAdmin ? "(admin)" : "(caja)"}
         </div>
 
+        {isAdmin ? (
+          <select
+            className="mb-3 p-2 rounded-lg bg-slate-800 border border-slate-700 text-sm"
+            value={activeBusinessId}
+            onChange={(e) => switchBusiness(e.target.value)}
+          >
+            <option value="">Seleccionar negocio</option>
+            {businesses.filter((business) => business.active).map((business) => (
+              <option key={business.id} value={business.id}>{business.name}</option>
+            ))}
+          </select>
+        ) : (
+          <div className="text-sm font-semibold text-blue-300 mb-3">{user.business?.name}</div>
+        )}
+
         <button
           onClick={() => {
             setView("pos");
@@ -806,6 +970,18 @@ export default function App() {
         </button>
 
         {isAdmin && (
+          <button
+            onClick={() => setView("businesses")}
+            className={
+              "px-4 py-3 rounded-lg text-left transition " +
+              (view === "businesses" ? "bg-blue-600 text-white shadow" : "text-slate-300 hover:bg-slate-800")
+            }
+          >
+            Negocios
+          </button>
+        )}
+
+        {isAdmin && activeBusinessId && (
           <>
             <button
               onClick={() => setView("inventory")}
@@ -844,7 +1020,7 @@ export default function App() {
                 (view === "users" ? "bg-blue-600 text-white shadow" : "text-slate-300 hover:bg-slate-800")
               }
             >
-              Usuarios
+              Empleados
             </button>
           </>
         )}
@@ -871,9 +1047,61 @@ export default function App() {
           <div className="text-right">
             <div className="text-xs uppercase tracking-widest text-slate-400">Usuario actual</div>
             <div className="text-sm font-semibold text-slate-800">{user.name || user.email}</div>
-            <div className="text-xs text-slate-500">{isAdmin ? "Administrador" : "Cajero"}</div>
+            <div className="text-xs text-slate-500">{isAdmin ? "Dueño" : "Cajero"}</div>
+            <div className="text-xs font-semibold text-blue-600 mt-1">
+              {activeBusiness?.name || "Sin negocio seleccionado"}
+            </div>
           </div>
         </div>
+
+        {view === "businesses" && isAdmin && (
+          <div className="max-w-5xl">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
+              <h2 className="text-xl font-semibold mb-4">Crear negocio</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <input
+                  className="p-3 border border-slate-200 rounded-lg"
+                  placeholder="Nombre"
+                  value={newBusiness.name}
+                  onChange={(e) => setNewBusiness((current) => ({ ...current, name: e.target.value }))}
+                />
+                <input
+                  className="p-3 border border-slate-200 rounded-lg"
+                  placeholder="Dirección"
+                  value={newBusiness.address}
+                  onChange={(e) => setNewBusiness((current) => ({ ...current, address: e.target.value }))}
+                />
+                <button onClick={createBusiness} className="bg-blue-600 text-white font-semibold rounded-lg px-4 py-3">
+                  Crear negocio
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr><th className="p-4">Negocio</th><th className="p-4">Dirección</th><th className="p-4">Estado</th><th className="p-4">Acciones</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {businesses.map((business) => (
+                    <tr key={business.id} className={business.active ? "" : "opacity-60"}>
+                      <td className="p-4 font-semibold">{business.name}</td>
+                      <td className="p-4 text-slate-600">{business.address || "-"}</td>
+                      <td className="p-4">{business.active ? "Activo" : "Desactivado"}</td>
+                      <td className="p-4 flex gap-3">
+                        {business.active && <button className="text-blue-600 font-semibold" onClick={() => switchBusiness(business.id)}>Seleccionar</button>}
+                        <button className="text-slate-600 font-semibold" onClick={() => editBusiness(business)}>Editar</button>
+                        <button className={business.active ? "text-rose-600 font-semibold" : "text-emerald-600 font-semibold"} onClick={() => toggleBusiness(business)}>
+                          {business.active ? "Desactivar" : "Reactivar"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* POS */}
         {view === "pos" && (
@@ -1134,6 +1362,26 @@ export default function App() {
             <h2 className="text-2xl font-semibold text-slate-900 mb-4">Inventario (admin)</h2>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
+              <div className="font-bold mb-3">Agregar desde el catálogo compartido</div>
+              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                <select
+                  className="p-3 border border-slate-200 rounded-lg bg-white"
+                  value={catalogSelection.productId}
+                  onChange={(e) => setCatalogSelection((current) => ({ ...current, productId: e.target.value }))}
+                >
+                  <option value="">Seleccionar producto</option>
+                  {catalog.filter((item) => !products.some((product) => product.productId === item.id)).map((item) => (
+                    <option key={item.id} value={item.id}>{item.name} ({item.code})</option>
+                  ))}
+                </select>
+                <input type="number" className="p-3 border rounded-lg" placeholder="Precio" value={catalogSelection.price} onChange={(e) => setCatalogSelection((current) => ({ ...current, price: e.target.value }))} />
+                <input type="number" className="p-3 border rounded-lg" placeholder="Costo" value={catalogSelection.costPrice} onChange={(e) => setCatalogSelection((current) => ({ ...current, costPrice: e.target.value }))} />
+                <input type="number" className="p-3 border rounded-lg" placeholder="Stock" value={catalogSelection.stock} onChange={(e) => setCatalogSelection((current) => ({ ...current, stock: e.target.value }))} />
+                <button className="bg-slate-900 text-white font-semibold rounded-lg" onClick={addCatalogProductToBusiness}>Agregar</button>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
               <div className="font-bold mb-3">Nuevo producto</div>
 
               <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
@@ -1285,6 +1533,12 @@ export default function App() {
                         </td>
                         <td className="p-4">
                           <div className="flex items-center gap-3">
+                            <button
+                              className="text-blue-600 font-semibold hover:text-blue-700"
+                              onClick={() => editCatalogProduct(p)}
+                            >
+                              Editar catálogo
+                            </button>
                             <button
                               className="text-amber-600 font-semibold hover:text-amber-700"
                               onClick={() => deactivateProductAction(p)}
@@ -1675,7 +1929,7 @@ export default function App() {
         {/* USERS (admin) */}
         {view === "users" && isAdmin && (
           <div className="max-w-3xl">
-            <h2 className="text-2xl font-semibold text-slate-900 mb-4">Usuarios (admin)</h2>
+            <h2 className="text-2xl font-semibold text-slate-900 mb-4">Empleados</h2>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
               <div className="font-bold mb-3">Crear usuario</div>
@@ -1705,7 +1959,6 @@ export default function App() {
                   onChange={(e) => setNewUser((s) => ({ ...s, role: e.target.value }))}
                 >
                   <option value="CASHIER">Cajero</option>
-                  <option value="ADMIN">Administrador</option>
                 </select>
                 <button
                   onClick={createUser}
@@ -1718,6 +1971,7 @@ export default function App() {
 
 
 
+            {false && (
             <div className="bg-white p-5 rounded-2xl border border-slate-200 mb-6 shadow-sm">
               <div className="font-bold mb-3">Reiniciar admin</div>
               <div className="text-sm text-slate-500 mb-3">
@@ -1757,6 +2011,7 @@ export default function App() {
                 </button>
               </div>
             </div>
+            )}
 
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
               <table className="w-full text-left text-sm">
@@ -1764,7 +2019,7 @@ export default function App() {
                   <tr>
                     <th className="p-4">Nombre</th>
                     <th className="p-4">Username</th>
-                    <th className="p-4">Rol</th>
+                    <th className="p-4">Negocio</th>
                     <th className="p-4">Acciones</th>
                   </tr>
                 </thead>
@@ -1773,14 +2028,20 @@ export default function App() {
                     <tr key={u.id} className="hover:bg-slate-50 even:bg-slate-50/60">
                       <td className="p-4 font-semibold">{u.name}</td>
                       <td className="p-4 text-slate-600">{u.username}</td>
-                      <td className="p-4 text-slate-600">{u.role}</td>
+                      <td className="p-4 text-slate-600">
+                        <select className="p-2 border rounded-lg" value={u.businessId || ""} onChange={(e) => moveUser(u, e.target.value)}>
+                          {businesses.filter((business) => business.active).map((business) => (
+                            <option key={business.id} value={business.id}>{business.name}</option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="p-4">
                         {u.id !== user.id && (
                           <button
-                            onClick={() => deleteUserAction(u.id)}
-                            className="text-red-600 font-semibold hover:text-red-700"
+                            onClick={() => u.active ? deleteUserAction(u.id) : toggleUserActive(u)}
+                            className={u.active ? "text-red-600 font-semibold hover:text-red-700" : "text-emerald-600 font-semibold"}
                           >
-                            Desactivar
+                            {u.active ? "Desactivar" : "Reactivar"}
                           </button>
                         )}
                       </td>

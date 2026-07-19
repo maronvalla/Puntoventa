@@ -3,6 +3,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 class ApiService {
   constructor() {
     this.token = localStorage.getItem("token");
+    this.businessId = localStorage.getItem("businessId");
   }
 
   setToken(token) {
@@ -16,6 +17,16 @@ class ApiService {
 
   getToken() {
     return this.token;
+  }
+
+  setBusinessId(businessId) {
+    this.businessId = businessId || null;
+    if (this.businessId) localStorage.setItem("businessId", this.businessId);
+    else localStorage.removeItem("businessId");
+  }
+
+  getBusinessId() {
+    return this.businessId;
   }
 
   async request(endpoint, options = {}) {
@@ -32,6 +43,7 @@ class ApiService {
     if (this.token) {
       headers.Authorization = `Bearer ${this.token}`;
     }
+    if (this.businessId) headers["X-Business-Id"] = this.businessId;
 
     const response = await fetch(url, {
       ...options,
@@ -77,6 +89,32 @@ class ApiService {
 
   async getMe() {
     return this.request("/auth/me");
+  }
+
+  // Businesses
+  async getBusinesses() {
+    return this.request("/businesses");
+  }
+
+  async createBusiness(data) {
+    return this.request("/businesses", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async updateBusiness(id, data) {
+    return this.request(`/businesses/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  // Shared catalog
+  async getCatalog() {
+    return this.request("/catalog");
+  }
+
+  async createCatalogProduct(data) {
+    return this.request("/catalog", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async updateCatalogProduct(id, data) {
+    return this.request(`/catalog/${id}`, { method: "PATCH", body: JSON.stringify(data) });
   }
 
   // Products
@@ -165,10 +203,7 @@ class ApiService {
   }
 
   async resetAdmin(data) {
-    return this.request("/users/reset-admin", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+    throw new Error("La administración ahora corresponde al dueño global");
   }
 
   async updateUser(id, data) {

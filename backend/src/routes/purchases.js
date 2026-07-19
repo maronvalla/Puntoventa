@@ -1,114 +1,61 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticate, requireAdmin } from "../middleware/auth.js";
+import { authenticate, requireBusiness, requireOwner } from "../middleware/auth.js";
 
 const router = Router();
+router.use(authenticate, requireOwner, requireBusiness);
 
-// GET /api/purchases - List purchases (admin only)
-router.get("/", authenticate, requireAdmin, async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const { dayKey } = req.query;
-
-    const where = {};
-    if (dayKey) {
-      where.dayKey = dayKey;
-    }
-
-    const purchases = await prisma.purchase.findMany({
-      where,
-      include: { items: true },
-      orderBy: { createdAt: "desc" },
-    });
-
-    const formatted = purchases.map((p) => ({
-      ...p,
-      totalCost: Number(p.totalCost),
-      items: p.items.map((i) => ({
-        ...i,
-        costPrice: Number(i.costPrice),
-      })),
-    }));
-
-    res.json(formatted);
+    const where = { businessId: req.businessId };
+    if (req.query.dayKey) where.dayKey = req.query.dayKey;
+    const purchases = await prisma.purchase.findMany({ where, include: { items: true }, orderBy: { createdAt: "desc" } });
+    res.json(purchases.map((purchase) => ({ ...purchase, totalCost: Number(purchase.totalCost),
+      items: purchase.items.map((item) => ({ ...item, costPrice: Number(item.costPrice) })) })));
   } catch (error) {
-    console.error("Get purchases error:", error);
     res.status(500).json({ error: "Error al obtener compras" });
   }
 });
 
-// POST /api/purchases - Register purchase (admin only)
-router.post("/", authenticate, requireAdmin, async (req, res) => {
+router.post("/", async (req, res) => {
   try {
-    const { dayKey, items } = req.body;
-
-    if (!items || !items.length) {
-      return res.status(400).json({ error: "Compra vacía" });
-    }
-
-    // Validate items
-    for (const item of items) {
-      if (!item.productId || !item.qty || item.qty <= 0 || item.costPrice == null || item.costPrice < 0) {
+    if (!Array.isArray(req.body.items) || !req.body.items.length) return res.status(400).json({ error: "Compra vacía" });
+    const requested = new Map();
+    for (const raw of req.body.items) {
+      const id = String(raw.productId || "");
+      const qty = Number(raw.qty);
+      const costPrice = Number(raw.costPrice);
+      if (!id || !Number.isInteger(qty) || qty <= 0 || !Number.isFinite(costPrice) || costPrice < 0) {
         return res.status(400).json({ error: "Items inválidos" });
       }
+      if (requested.has(id)) return res.status(400).json({ error: "Producto duplicado en la compra" });
+      requested.set(id, { qty, costPrice });
     }
 
-    const totalCost = items.reduce((sum, i) => sum + Number(i.qty) * Number(i.costPrice), 0);
-
-    const result = await prisma.$transaction(async (tx) => {
-      // Verify products exist
-      const productIds = items.map((i) => i.productId);
-      const products = await tx.product.findMany({
-        where: { id: { in: productIds } },
+    const purchase = await prisma.$transaction(async (tx) => {
+      const inventory = await tx.businessProduct.findMany({
+        where: { id: { in: [...requested.keys()] }, businessId: req.businessId, active: true }, include: { product: true },
       });
-
-      if (products.length !== items.length) {
-        throw new Error("Algunos productos no fueron encontrados");
+      if (inventory.length !== requested.size) throw new Error("Algunos productos no pertenecen al negocio");
+      const lines = inventory.map((item) => ({ businessProductId: item.id, name: item.product.name, ...requested.get(item.id) }));
+      const totalCost = lines.reduce((sum, item) => sum + item.qty * item.costPrice, 0);
+      const created = await tx.purchase.create({ data: {
+        businessId: req.businessId, adminId: req.user.id, adminName: req.user.name,
+        dayKey: req.body.dayKey || new Date().toISOString().split("T")[0], totalCost,
+        items: { create: lines },
+      }, include: { items: true } });
+      for (const line of lines) {
+        await tx.businessProduct.update({ where: { id: line.businessProductId }, data: {
+          stock: { increment: line.qty }, costPrice: line.costPrice,
+        } });
       }
-
-      const productMap = new Map(products.map((p) => [p.id, p]));
-
-      // Create purchase
-      const purchase = await tx.purchase.create({
-        data: {
-          adminId: req.user.id,
-          adminName: req.user.name,
-          dayKey: dayKey || new Date().toISOString().split("T")[0],
-          totalCost,
-          items: {
-            create: items.map((item) => ({
-              productId: item.productId,
-              name: productMap.get(item.productId).name,
-              qty: Number(item.qty),
-              costPrice: Number(item.costPrice),
-            })),
-          },
-        },
-        include: { items: true },
-      });
-
-      // Update stock
-      for (const item of items) {
-        const product = productMap.get(item.productId);
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { stock: product.stock + Number(item.qty) },
-        });
-      }
-
-      return purchase;
+      return created;
     });
-
-    res.status(201).json({
-      ...result,
-      totalCost: Number(result.totalCost),
-      items: result.items.map((i) => ({
-        ...i,
-        costPrice: Number(i.costPrice),
-      })),
-    });
+    res.status(201).json({ ...purchase, totalCost: Number(purchase.totalCost),
+      items: purchase.items.map((item) => ({ ...item, costPrice: Number(item.costPrice) })) });
   } catch (error) {
     console.error("Create purchase error:", error);
-    res.status(500).json({ error: error.message || "Error al registrar compra" });
+    res.status(400).json({ error: error.message || "Error al registrar compra" });
   }
 });
 

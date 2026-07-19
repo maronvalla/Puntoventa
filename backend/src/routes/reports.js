@@ -1,141 +1,54 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticate, requireAdmin } from "../middleware/auth.js";
+import { authenticate, requireBusiness } from "../middleware/auth.js";
 
 const router = Router();
+const dayKeyTucuman = (date = new Date()) => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Argentina/Tucuman", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(date);
+router.use(authenticate, requireBusiness);
 
-// Helper: Get Tucuman day key
-function dayKeyTucuman(date = new Date()) {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Tucuman",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return fmt.format(date);
-}
-
-// GET /api/reports/daily - Daily report
-router.get("/daily", authenticate, async (req, res) => {
+router.get("/daily", async (req, res) => {
   try {
-    const isAdmin = req.user.role === "ADMIN";
+    const isOwner = req.user.role === "OWNER";
     const todayKey = dayKeyTucuman();
-    let { dayKey } = req.query;
-
-    // Cashiers can only see today
-    if (!isAdmin && dayKey !== todayKey) {
-      dayKey = todayKey;
-    }
-
-    if (!dayKey) {
-      dayKey = todayKey;
-    }
-
-    const where = { dayKey };
-
-    // Cashiers only see their own sales
-    if (!isAdmin) {
-      where.sellerId = req.user.id;
-    }
-
-    const sales = await prisma.sale.findMany({
-      where,
-      include: { items: true },
-    });
-
-    const activeSales = sales.filter((s) => s.status === "ACTIVE");
-    const voidedCount = sales.filter((s) => s.status === "VOIDED").length;
-
-    // Calculate totals
-    const totalDay = activeSales.reduce((sum, s) => sum + Number(s.total), 0);
-
-    // Payment method breakdown
+    const dayKey = !isOwner ? todayKey : (req.query.dayKey || todayKey);
+    const where = { businessId: req.businessId, dayKey };
+    if (!isOwner) where.sellerId = req.user.id;
+    const sales = await prisma.sale.findMany({ where, include: { items: true } });
+    const activeSales = sales.filter((sale) => sale.status === "ACTIVE");
+    const totalDay = activeSales.reduce((sum, sale) => sum + Number(sale.total), 0);
     const totalsByPayment = { cash: 0, transfer: 0 };
-    for (const s of activeSales) {
-      if (s.paymentMethod === "TRANSFER") {
-        totalsByPayment.transfer += Number(s.transferAmount);
-      } else if (s.paymentMethod === "MIXED") {
-        totalsByPayment.cash += Number(s.cashAmount);
-        totalsByPayment.transfer += Number(s.transferAmount);
-      } else {
-        totalsByPayment.cash += Number(s.cashAmount);
-      }
-    }
-
-    // Cost of goods sold (admin only)
     let cogsDay = 0;
-    if (isAdmin) {
-      for (const s of activeSales) {
-        for (const item of s.items) {
-          cogsDay += Number(item.qty) * Number(item.itemCostPrice);
-        }
+    const totalsByUser = {};
+    for (const sale of activeSales) {
+      totalsByPayment.cash += Number(sale.cashAmount);
+      totalsByPayment.transfer += Number(sale.transferAmount);
+      if (isOwner) {
+        totalsByUser[sale.sellerName || "Sin usuario"] = (totalsByUser[sale.sellerName || "Sin usuario"] || 0) + Number(sale.total);
+        cogsDay += sale.items.reduce((sum, item) => sum + item.qty * Number(item.itemCostPrice), 0);
       }
     }
-
-    const profitDay = totalDay - cogsDay;
-
-    // Totals by user (admin only)
-    let totalsByUser = {};
-    if (isAdmin) {
-      for (const s of activeSales) {
-        const name = s.sellerName || "Sin usuario";
-        totalsByUser[name] = (totalsByUser[name] || 0) + Number(s.total);
-      }
-    }
-
-    // For cashiers, list their sales
-    let salesList = [];
-    if (!isAdmin) {
-      salesList = activeSales.map((s) => ({
-        id: s.id,
-        total: Number(s.total),
-        itemCount: s.items.length,
-        createdAt: s.createdAt,
-      }));
-    }
-
-    res.json({
-      dayKey,
-      todayKey,
-      isAdmin,
-      totalDay,
-      totalsByPayment,
-      cogsDay: isAdmin ? cogsDay : undefined,
-      profitDay: isAdmin ? profitDay : undefined,
-      totalsByUser: isAdmin ? totalsByUser : undefined,
-      voidedCount,
+    res.json({ dayKey, todayKey, isAdmin: isOwner, totalDay, totalsByPayment,
+      cogsDay: isOwner ? cogsDay : undefined, profitDay: isOwner ? totalDay - cogsDay : undefined,
+      totalsByUser: isOwner ? totalsByUser : undefined,
+      voidedCount: sales.filter((sale) => sale.status === "VOIDED").length,
       salesCount: activeSales.length,
-      salesList: !isAdmin ? salesList : undefined,
+      salesList: !isOwner ? activeSales.map((sale) => ({ id: sale.id, total: Number(sale.total), itemCount: sale.items.length, createdAt: sale.createdAt })) : undefined,
     });
   } catch (error) {
-    console.error("Daily report error:", error);
     res.status(500).json({ error: "Error al generar reporte" });
   }
 });
 
-router.get("/top-product", authenticate, async (req, res) => {
+router.get("/top-product", async (req, res) => {
   try {
-    const top = await prisma.saleItem.groupBy({
+    const grouped = await prisma.saleItem.groupBy({
       by: ["name"],
-      _sum: {
-        qty: true,
-      },
-      orderBy: {
-        _sum: {
-          qty: "desc",
-        },
-      },
-      take: 1,
+      where: { sale: { businessId: req.businessId, status: "ACTIVE" } },
+      _sum: { qty: true }, orderBy: { _sum: { qty: "desc" } }, take: 1,
     });
-
-    if (top.length === 0) {
-      return res.json(null);
-    }
-
-    res.json({
-      name: top[0].name,
-      qty: top[0]._sum.qty,
-    });
+    res.json(grouped.length ? { name: grouped[0].name, qty: grouped[0]._sum.qty } : null);
   } catch (error) {
     console.error("Top product error:", error);
     res.status(500).json({ error: "Error al obtener producto más vendido" });
