@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 const owner = { id: "owner-1", username: "admin", name: "Alejandro", role: "OWNER" };
 const business = { id: "business-1", name: "Sucursal Centro", address: "San Martín 120", active: true };
-const product = { id: "inventory-1", productId: "product-1", name: "Gaseosa 500 ml", code: "gas-500", barcode: "7790001", price: 1800, costPrice: 1000, stock: 3, active: true };
+const product = { id: "inventory-1", productId: "product-1", name: "Gaseosa 500 ml", code: "gas-500", barcode: "7790001", price: 1800, costPrice: 1000, stock: 3, criticalStock: 4, active: true };
 
 async function mockApi(page) {
   await page.addInitScript(() => localStorage.setItem("token", "test-token"));
@@ -26,10 +26,13 @@ test("el dueño inicia en el resumen y gestiona productos con panel lateral", as
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Resumen" })).toBeVisible();
   await expect(page.getByText("Ventas de hoy")).toBeVisible();
+  await expect(page.getByText("Notificaciones de inventario")).toBeVisible();
+  await expect(page.getByText("Avisar en 4 u.")).toBeVisible();
   await page.getByRole("button", { name: "Productos", exact: true }).click();
   await expect(page.getByRole("table").getByText("Gaseosa 500 ml")).toBeVisible();
   await page.getByRole("button", { name: "Nuevo producto" }).click();
   await expect(page.getByRole("dialog").getByText("Nuevo producto")).toBeVisible();
+  await expect(page.getByRole("dialog").getByLabel("Stock crítico")).toHaveValue("5");
 });
 
 test("la navegación administrativa se adapta al móvil", async ({ page }) => {

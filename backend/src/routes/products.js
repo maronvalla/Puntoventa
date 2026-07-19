@@ -13,6 +13,7 @@ const format = (item) => ({
   price: Number(item.price),
   costPrice: Number(item.costPrice),
   stock: item.stock,
+  criticalStock: item.criticalStock,
   active: item.active,
   createdAt: item.createdAt,
   updatedAt: item.updatedAt,
@@ -51,12 +52,16 @@ router.get("/:id", authenticate, requireBusiness, async (req, res) => {
 
 router.post("/", authenticate, requireOwner, requireBusiness, async (req, res) => {
   try {
-    const { productId, name, code, barcode, price, costPrice, stock } = req.body;
+    const { productId, name, code, barcode, price, costPrice, stock, criticalStock = 5 } = req.body;
     if (price == null || costPrice == null || stock == null) {
       return res.status(400).json({ error: "Precio, costo y stock requeridos" });
     }
     if (![price, costPrice, stock].every((value) => Number.isFinite(Number(value))) || Number(price) < 0 || Number(costPrice) < 0) {
       return res.status(400).json({ error: "Precio, costo o stock inválidos" });
+    }
+
+    if (!Number.isInteger(Number(criticalStock)) || Number(criticalStock) < 0) {
+      return res.status(400).json({ error: "El stock crítico debe ser un número entero mayor o igual a cero" });
     }
 
     const item = await prisma.$transaction(async (tx) => {
@@ -80,6 +85,7 @@ router.post("/", authenticate, requireOwner, requireBusiness, async (req, res) =
           price: Number(price),
           costPrice: Number(costPrice),
           stock: Number(stock),
+          criticalStock: Number(criticalStock),
         },
         include: { product: true },
       });
@@ -108,6 +114,13 @@ router.patch("/:id", authenticate, requireOwner, requireBusiness, async (req, re
       const stock = Number(req.body.stock);
       if (!Number.isFinite(stock)) return res.status(400).json({ error: "Stock inválido" });
       data.stock = stock;
+    }
+    if (req.body.criticalStock != null) {
+      const criticalStock = Number(req.body.criticalStock);
+      if (!Number.isInteger(criticalStock) || criticalStock < 0) {
+        return res.status(400).json({ error: "El stock crítico debe ser un número entero mayor o igual a cero" });
+      }
+      data.criticalStock = criticalStock;
     }
     if (req.body.active != null) data.active = Boolean(req.body.active);
     const item = await prisma.businessProduct.update({ where: { id: existing.id }, data, include: { product: true } });

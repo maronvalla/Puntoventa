@@ -65,17 +65,18 @@ model Product {
 }
 
 model BusinessProduct {
-  id         String   @id @default(cuid())
-  business   Business @relation(fields: [businessId], references: [id])
-  businessId String
-  product    Product  @relation(fields: [productId], references: [id])
-  productId  String
-  price      Decimal  @db.Decimal(12, 2)
-  costPrice  Decimal  @db.Decimal(12, 2)
-  stock      Int      @default(0)
-  active     Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id            String   @id @default(cuid())
+  business      Business @relation(fields: [businessId], references: [id])
+  businessId    String
+  product       Product  @relation(fields: [productId], references: [id])
+  productId     String
+  price         Decimal  @db.Decimal(12, 2)
+  costPrice     Decimal  @db.Decimal(12, 2)
+  stock         Int      @default(0)
+  criticalStock Int      @default(5)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   saleItems        SaleItem[]
   purchaseItems    PurchaseItem[]

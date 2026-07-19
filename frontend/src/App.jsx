@@ -19,6 +19,10 @@ function money(n) {
   return x.toLocaleString("es-AR", { maximumFractionDigits: 0 });
 }
 
+function isCriticalStock(product) {
+  return Number(product.stock) <= Number(product.criticalStock ?? 5);
+}
+
 function formatTime(dateString) {
   if (!dateString) return "-";
   const d = new Date(dateString);
@@ -115,7 +119,7 @@ export default function App() {
   const [editingUser, setEditingUser] = useState(null);
   const [stockDialog, setStockDialog] = useState(null);
   const [businessForm, setBusinessForm] = useState({ name: "", address: "" });
-  const [productForm, setProductForm] = useState({ mode: "new", productId: "", name: "", code: "", barcode: "", price: "", costPrice: "", stock: "" });
+  const [productForm, setProductForm] = useState({ mode: "new", productId: "", name: "", code: "", barcode: "", price: "", costPrice: "", stock: "", criticalStock: "5" });
   const [userForm, setUserForm] = useState({ username: "", password: "", name: "", businessId: "" });
 
   // Login gate
@@ -933,7 +937,7 @@ export default function App() {
   const filteredProducts = useMemo(() => {
     const query = adminSearch.trim().toLowerCase();
     return products
-      .filter((p) => productStatus === "all" || (productStatus === "active" ? p.active : !p.active))
+      .filter((p) => productStatus === "all" || (productStatus === "critical" ? p.active && isCriticalStock(p) : productStatus === "active" ? p.active : !p.active))
       .filter((p) => !query || [p.name, p.code, p.barcode].some((value) => String(value || "").toLowerCase().includes(query)))
       .sort((a, b) => {
         if (productSort === "stock") return Number(a.stock) - Number(b.stock);
@@ -942,7 +946,7 @@ export default function App() {
       });
   }, [products, adminSearch, productStatus, productSort]);
 
-  const lowStockProducts = useMemo(() => products.filter((p) => p.active && Number(p.stock) <= 5).sort((a, b) => a.stock - b.stock), [products]);
+  const criticalStockProducts = useMemo(() => products.filter((p) => p.active && isCriticalStock(p)).sort((a, b) => (Number(a.stock) - Number(a.criticalStock ?? 5)) - (Number(b.stock) - Number(b.criticalStock ?? 5))), [products]);
   const activeEmployees = useMemo(() => profiles.filter((profile) => profile.active), [profiles]);
   const recentSales = useMemo(() => [...daySalesActive].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5), [daySalesActive]);
   const reportChartMax = useMemo(() => Math.max(1, ...(reportSummary?.trend || []).map((item) => Number(item.grossSales || 0))), [reportSummary]);
@@ -985,28 +989,29 @@ export default function App() {
     setEditingProduct(product);
     setProductForm(product ? {
       mode: "edit", productId: product.productId, name: product.name, code: product.code || "", barcode: product.barcode || "",
-      price: String(product.price), costPrice: String(product.costPrice), stock: String(product.stock),
-    } : { mode: "new", productId: "", name: "", code: "", barcode: "", price: "", costPrice: "", stock: "" });
+      price: String(product.price), costPrice: String(product.costPrice), stock: String(product.stock), criticalStock: String(product.criticalStock ?? 5),
+    } : { mode: "new", productId: "", name: "", code: "", barcode: "", price: "", costPrice: "", stock: "", criticalStock: "5" });
     setDrawer("product");
   }
 
   async function saveProductForm() {
-    const price = Number(productForm.price), costPrice = Number(productForm.costPrice), stock = Number(productForm.stock);
+    const price = Number(productForm.price), costPrice = Number(productForm.costPrice), stock = Number(productForm.stock), criticalStock = Number(productForm.criticalStock);
+    if (!Number.isInteger(criticalStock) || criticalStock < 0) return notify("El stock crítico debe ser un número entero mayor o igual a cero.", "error");
     if (![price, costPrice, stock].every(Number.isFinite) || price < 0 || costPrice < 0) return notify("Revisá precio, costo y stock.", "error");
     try {
       if (editingProduct) {
         await Promise.all([
           api.updateCatalogProduct(editingProduct.productId, { name: productForm.name.trim(), code: productForm.code.trim(), barcode: productForm.barcode.trim() }),
-          api.updateProduct(editingProduct.id, { price, costPrice, stock }),
+          api.updateProduct(editingProduct.id, { price, costPrice, stock, criticalStock }),
         ]);
         notify("Producto actualizado.");
       } else if (productForm.mode === "catalog") {
         if (!productForm.productId) return notify("Seleccioná un producto del catálogo.", "error");
-        await api.createProduct({ productId: productForm.productId, price, costPrice, stock });
+        await api.createProduct({ productId: productForm.productId, price, costPrice, stock, criticalStock });
         notify("Producto agregado al negocio.");
       } else {
         if (!productForm.name.trim() || !productForm.code.trim()) return notify("Nombre y código son obligatorios.", "error");
-        await api.createProduct({ name: productForm.name.trim(), code: productForm.code.trim(), barcode: productForm.barcode.trim(), price, costPrice, stock });
+        await api.createProduct({ name: productForm.name.trim(), code: productForm.code.trim(), barcode: productForm.barcode.trim(), price, costPrice, stock, criticalStock });
         notify("Producto creado.");
       }
       setDrawer(null);
@@ -1335,16 +1340,16 @@ export default function App() {
               {[
                 ["Ventas de hoy", `$ ${money(totalDay)}`, `${daySalesActive.length} operaciones`, "blue"],
                 ["Ganancia", `$ ${money(profitDay)}`, "Venta menos costos", "emerald"],
-                ["Stock bajo", lowStockProducts.length, lowStockProducts.length ? "Requieren atención" : "Todo en orden", "amber"],
+                ["Stock crítico", criticalStockProducts.length, criticalStockProducts.length ? "Requieren atención" : "Todo en orden", "amber"],
                 ["Equipo activo", activeEmployees.length, `${profiles.length} empleados totales`, "violet"],
-              ].map(([label, value, note, tone]) => <article key={label} className="metric-card"><div className={`metric-icon ${tone}`}><Icon name={label === "Equipo activo" ? "users" : label === "Stock bajo" ? "alert" : "sales"} /></div><div className="mt-4 text-xs font-bold uppercase tracking-wider text-slate-500">{label}</div><div className="mt-1 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">{value}</div><div className="mt-1 text-xs text-slate-500">{note}</div></article>)}
+              ].map(([label, value, note, tone]) => <article key={label} className="metric-card"><div className={`metric-icon ${tone}`}><Icon name={label === "Equipo activo" ? "users" : label === "Stock crítico" ? "alert" : "sales"} /></div><div className="mt-4 text-xs font-bold uppercase tracking-wider text-slate-500">{label}</div><div className="mt-1 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">{value}</div><div className="mt-1 text-xs text-slate-500">{note}</div></article>)}
             </section>
             <section className="grid gap-6 lg:grid-cols-5">
               <div className="admin-card lg:col-span-3"><div className="card-heading"><div><h3>Actividad reciente</h3><p>Últimas ventas registradas hoy</p></div><button className="text-button" onClick={() => navigateAdmin("sales")}>Ver todas <Icon name="chevron" size={16}/></button></div>
                 <div className="divide-y divide-slate-100">{recentSales.map((sale) => <div key={sale.id} className="flex items-center justify-between py-4"><div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-600"><Icon name="sales" size={18}/></div><div><div className="text-sm font-bold">Venta de {sale.sellerName}</div><div className="text-xs text-slate-500">{formatTime(sale.createdAt)} · {(sale.items || []).length} productos</div></div></div><div className="text-sm font-black">$ {money(sale.total)}</div></div>)}{!recentSales.length && <div className="empty-state">Todavía no hay ventas registradas hoy.</div>}</div>
               </div>
-              <div className="admin-card lg:col-span-2"><div className="card-heading"><div><h3>Stock para revisar</h3><p>Productos con 5 unidades o menos</p></div></div>
-                <div className="space-y-3">{lowStockProducts.slice(0, 5).map((product) => <button key={product.id} className="flex w-full items-center justify-between rounded-xl bg-slate-50 p-3 text-left hover:bg-slate-100" onClick={() => { navigateAdmin("inventory"); setAdminSearch(product.name); }}><div><div className="text-sm font-bold">{product.name}</div><div className="text-xs text-slate-500">{product.code}</div></div><span className={`status-badge ${Number(product.stock) <= 0 ? "danger" : "warning"}`}>{product.stock} u.</span></button>)}{!lowStockProducts.length && <div className="empty-state">El stock está saludable.</div>}</div>
+              <div className="admin-card lg:col-span-2"><div className="card-heading"><div><h3>Notificaciones de inventario</h3><p>Productos que alcanzaron su stock crítico</p></div></div>
+                <div className="space-y-3">{criticalStockProducts.slice(0, 5).map((product) => <button key={product.id} className="flex w-full items-center justify-between rounded-xl bg-amber-50 p-3 text-left hover:bg-amber-100" onClick={() => { navigateAdmin("inventory"); setAdminSearch(product.name); }}><div><div className="text-sm font-bold">{product.name}</div><div className="text-xs text-slate-500">{product.code} · Avisar en {product.criticalStock ?? 5} u.</div></div><span className={`status-badge ${Number(product.stock) <= 0 ? "danger" : "warning"}`}>{product.stock} u.</span></button>)}{!criticalStockProducts.length && <div className="empty-state">No hay notificaciones de stock crítico.</div>}</div>
               </div>
             </section>
           </div>
@@ -1670,10 +1675,10 @@ export default function App() {
         {view === "inventory" && isAdmin && (
           <div className="mx-auto max-w-7xl">
             <div className="section-toolbar"><div><h3>Catálogo del negocio</h3><p>Administrá precios, costos y stock sin perder el contexto.</p></div><button className="btn btn-primary" onClick={() => openProductDrawer()}><Icon name="plus" size={18}/>Nuevo producto</button></div>
-            <div className="admin-card mb-4 p-3 sm:p-4"><div className="grid gap-3 md:grid-cols-[1fr_auto_auto]"><div className="search-box"><Icon name="search" size={18}/><input value={adminSearch} onChange={(event) => setAdminSearch(event.target.value)} placeholder="Buscar por nombre, código o barras..."/></div><select className="admin-select" value={productStatus} onChange={(event) => setProductStatus(event.target.value)}><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select><select className="admin-select" value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="name">Orden: Nombre</option><option value="stock">Orden: Menor stock</option><option value="margin">Orden: Mayor margen</option></select></div></div>
+            <div className="admin-card mb-4 p-3 sm:p-4"><div className="grid gap-3 md:grid-cols-[1fr_auto_auto]"><div className="search-box"><Icon name="search" size={18}/><input value={adminSearch} onChange={(event) => setAdminSearch(event.target.value)} placeholder="Buscar por nombre, código o barras..."/></div><select className="admin-select" value={productStatus} onChange={(event) => setProductStatus(event.target.value)}><option value="active">Activos</option><option value="critical">Stock crítico</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select><select className="admin-select" value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="name">Orden: Nombre</option><option value="stock">Orden: Menor stock</option><option value="margin">Orden: Mayor margen</option></select></div></div>
             <div className="admin-card overflow-hidden p-0">
-              <div className="hidden overflow-x-auto md:block"><table className="admin-table"><thead><tr><th>Producto</th><th>Venta</th><th>Costo</th><th>Margen</th><th>Stock</th><th>Estado</th><th></th></tr></thead><tbody>{filteredProducts.map((product) => { const margin = Number(product.price) - Number(product.costPrice); return <tr key={product.id}><td><div className="font-bold text-slate-900">{product.name}</div><div className="text-xs text-slate-500">{product.code}{product.barcode ? ` · ${product.barcode}` : ""}</div></td><td className="font-semibold">$ {money(product.price)}</td><td>$ {money(product.costPrice)}</td><td><span className={margin >= 0 ? "text-emerald-600" : "text-rose-600"}>$ {money(margin)}</span></td><td><button className={`stock-pill ${Number(product.stock) <= 0 ? "danger" : Number(product.stock) <= 5 ? "warning" : ""}`} onClick={() => setStockDialog({ product, delta: "", reason: "" })}>{product.stock} u.</button></td><td><span className={`status-badge ${product.active ? "success" : "neutral"}`}>{product.active ? "Activo" : "Inactivo"}</span></td><td><div className="flex justify-end gap-1"><button className="icon-button" title="Editar" onClick={() => openProductDrawer(product)}><Icon name="edit" size={17}/></button><button className={`text-button px-2 ${product.active ? "text-rose-600" : "text-emerald-600"}`} onClick={() => requestToggle("producto", product)}>{product.active ? "Desactivar" : "Reactivar"}</button></div></td></tr>; })}</tbody></table></div>
-              <div className="divide-y divide-slate-100 md:hidden">{filteredProducts.map((product) => <article key={product.id} className="p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-bold">{product.name}</h3><p className="text-xs text-slate-500">{product.code}</p></div><span className={`status-badge ${product.active ? "success" : "neutral"}`}>{product.active ? "Activo" : "Inactivo"}</span></div><div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-slate-50 p-3 text-sm"><div><span className="block text-xs text-slate-500">Venta</span><b>$ {money(product.price)}</b></div><div><span className="block text-xs text-slate-500">Costo</span><b>$ {money(product.costPrice)}</b></div><div><span className="block text-xs text-slate-500">Stock</span><b>{product.stock} u.</b></div></div><div className="mt-3 flex gap-2"><button className="btn btn-soft flex-1" onClick={() => openProductDrawer(product)}>Editar</button><button className="btn btn-ghost flex-1" onClick={() => setStockDialog({ product, delta: "", reason: "" })}>Ajustar stock</button></div></article>)} </div>
+              <div className="hidden overflow-x-auto md:block"><table className="admin-table"><thead><tr><th>Producto</th><th>Venta</th><th>Costo</th><th>Margen</th><th>Stock actual</th><th>Stock crítico</th><th>Estado</th><th></th></tr></thead><tbody>{filteredProducts.map((product) => { const margin = Number(product.price) - Number(product.costPrice); return <tr key={product.id}><td><div className="font-bold text-slate-900">{product.name}</div><div className="text-xs text-slate-500">{product.code}{product.barcode ? ` · ${product.barcode}` : ""}</div></td><td className="font-semibold">$ {money(product.price)}</td><td>$ {money(product.costPrice)}</td><td><span className={margin >= 0 ? "text-emerald-600" : "text-rose-600"}>$ {money(margin)}</span></td><td><button className={`stock-pill ${Number(product.stock) <= 0 ? "danger" : isCriticalStock(product) ? "warning" : ""}`} onClick={() => setStockDialog({ product, delta: "", reason: "" })}>{product.stock} u.</button></td><td><span className={`status-badge ${isCriticalStock(product) ? "warning" : "neutral"}`}>{product.criticalStock ?? 5} u.</span></td><td><span className={`status-badge ${product.active ? "success" : "neutral"}`}>{product.active ? "Activo" : "Inactivo"}</span></td><td><div className="flex justify-end gap-1"><button className="icon-button" title="Editar" onClick={() => openProductDrawer(product)}><Icon name="edit" size={17}/></button><button className={`text-button px-2 ${product.active ? "text-rose-600" : "text-emerald-600"}`} onClick={() => requestToggle("producto", product)}>{product.active ? "Desactivar" : "Reactivar"}</button></div></td></tr>; })}</tbody></table></div>
+              <div className="divide-y divide-slate-100 md:hidden">{filteredProducts.map((product) => <article key={product.id} className="p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-bold">{product.name}</h3><p className="text-xs text-slate-500">{product.code}</p></div><span className={`status-badge ${product.active ? "success" : "neutral"}`}>{product.active ? "Activo" : "Inactivo"}</span></div><div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-3 text-sm"><div><span className="block text-xs text-slate-500">Venta</span><b>$ {money(product.price)}</b></div><div><span className="block text-xs text-slate-500">Costo</span><b>$ {money(product.costPrice)}</b></div><div><span className="block text-xs text-slate-500">Stock actual</span><b className={isCriticalStock(product) ? "text-amber-700" : ""}>{product.stock} u.</b></div><div><span className="block text-xs text-slate-500">Avisar en</span><b>{product.criticalStock ?? 5} u.</b></div></div><div className="mt-3 flex gap-2"><button className="btn btn-soft flex-1" onClick={() => openProductDrawer(product)}>Editar</button><button className="btn btn-ghost flex-1" onClick={() => setStockDialog({ product, delta: "", reason: "" })}>Ajustar stock</button></div></article>)} </div>
               {!filteredProducts.length && <div className="empty-state m-6">No encontramos productos con esos filtros.</div>}
             </div>
           </div>
@@ -2531,7 +2536,7 @@ export default function App() {
         <div className="space-y-6">
           {!editingProduct && <div className="grid grid-cols-2 rounded-xl bg-slate-100 p-1"><button className={`rounded-lg px-3 py-2 text-sm font-bold ${productForm.mode === "new" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`} onClick={() => setProductForm((form) => ({ ...form, mode: "new", productId: "" }))}>Producto nuevo</button><button className={`rounded-lg px-3 py-2 text-sm font-bold ${productForm.mode === "catalog" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`} onClick={() => setProductForm((form) => ({ ...form, mode: "catalog" }))}>Usar catálogo</button></div>}
           {productForm.mode === "catalog" && !editingProduct ? <Field label="Producto del catálogo"><select className="admin-input" value={productForm.productId} onChange={(event) => setProductForm((form) => ({ ...form, productId: event.target.value }))}><option value="">Seleccionar producto...</option>{catalog.filter((item) => !products.some((product) => product.productId === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.code}</option>)}</select></Field> : <div className="space-y-4"><div className="form-section-title">Información general</div><Field label="Nombre"><input className="admin-input" autoFocus value={productForm.name} onChange={(event) => setProductForm((form) => ({ ...form, name: event.target.value }))} placeholder="Nombre del producto"/></Field><div className="grid grid-cols-2 gap-3"><Field label="Código interno"><input className="admin-input" value={productForm.code} onChange={(event) => setProductForm((form) => ({ ...form, code: event.target.value }))} placeholder="prod-001"/></Field><Field label="Código de barras"><input className="admin-input" value={productForm.barcode} onChange={(event) => setProductForm((form) => ({ ...form, barcode: event.target.value }))} placeholder="Opcional"/></Field></div></div>}
-          <div className="space-y-4"><div className="form-section-title">Valores de {activeBusiness?.name}</div><div className="grid grid-cols-2 gap-3"><Field label="Precio de venta"><input className="admin-input" type="number" min="0" value={productForm.price} onChange={(event) => setProductForm((form) => ({ ...form, price: event.target.value }))}/></Field><Field label="Costo"><input className="admin-input" type="number" min="0" value={productForm.costPrice} onChange={(event) => setProductForm((form) => ({ ...form, costPrice: event.target.value }))}/></Field></div><Field label="Stock actual"><input className="admin-input" type="number" value={productForm.stock} onChange={(event) => setProductForm((form) => ({ ...form, stock: event.target.value }))}/></Field>{Number.isFinite(Number(productForm.price)) && Number.isFinite(Number(productForm.costPrice)) && <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Margen estimado: <b>$ {money(Number(productForm.price) - Number(productForm.costPrice))}</b></div>}</div>
+          <div className="space-y-4"><div className="form-section-title">Valores de {activeBusiness?.name}</div><div className="grid grid-cols-2 gap-3"><Field label="Precio de venta"><input className="admin-input" type="number" min="0" value={productForm.price} onChange={(event) => setProductForm((form) => ({ ...form, price: event.target.value }))}/></Field><Field label="Costo"><input className="admin-input" type="number" min="0" value={productForm.costPrice} onChange={(event) => setProductForm((form) => ({ ...form, costPrice: event.target.value }))}/></Field></div><div className="grid grid-cols-2 gap-3"><Field label="Stock actual"><input className="admin-input" type="number" value={productForm.stock} onChange={(event) => setProductForm((form) => ({ ...form, stock: event.target.value }))}/></Field><Field label="Stock crítico" hint="Te avisaremos cuando el stock llegue a este valor."><input className="admin-input" type="number" min="0" step="1" value={productForm.criticalStock} onChange={(event) => setProductForm((form) => ({ ...form, criticalStock: event.target.value }))}/></Field></div>{Number.isFinite(Number(productForm.price)) && Number.isFinite(Number(productForm.costPrice)) && <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Margen estimado: <b>$ {money(Number(productForm.price) - Number(productForm.costPrice))}</b></div>}</div>
         </div>
       </Drawer>
 
