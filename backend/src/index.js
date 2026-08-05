@@ -10,6 +10,7 @@ import purchasesRoutes from "./routes/purchases.js";
 import reportsRoutes from "./routes/reports.js";
 import businessesRoutes from "./routes/businesses.js";
 import catalogRoutes from "./routes/catalog.js";
+import plushRoutes from "./routes/plush.js";
 
 dotenv.config();
 
@@ -40,7 +41,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: "3mb" }));
 
 // Health check
 app.get("/", (req, res) => {
@@ -60,6 +61,7 @@ app.use("/api/purchases", purchasesRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/businesses", businessesRoutes);
 app.use("/api/catalog", catalogRoutes);
+app.use("/api/plush", plushRoutes);
 
 // Error handler
 app.use((err, req, res, next) => {

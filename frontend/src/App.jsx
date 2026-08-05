@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import api from "./services/api.js";
+import PlushPortal from "./components/PlushPortal.jsx";
 
 /**
  * Helpers
@@ -42,6 +43,7 @@ const iconPaths = {
   sales: <><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></>,
   users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></>,
   report: <><path d="M4 19.5V4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5"/><path d="M8 7h8M8 11h6"/></>,
+  plush: <><circle cx="8" cy="7" r="2.5"/><circle cx="16" cy="7" r="2.5"/><circle cx="12" cy="13" r="6"/><path d="M9.5 13h.01M14.5 13h.01M10 16c1.2.8 2.8.8 4 0M6.5 18.5 5 21M17.5 18.5 19 21"/></>,
   plus: <><path d="M12 5v14M5 12h14"/></>, search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
   close: <><path d="m6 6 12 12M18 6 6 18"/></>, edit: <><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></>,
   menu: <><path d="M4 6h16M4 12h16M4 18h16"/></>, chevron: <><path d="m9 18 6-6-6-6"/></>,
@@ -1095,6 +1097,8 @@ export default function App() {
               ? "Ventas"
               : view === "businesses"
                 ? "Negocios"
+                : view === "plush"
+                  ? "Pelucheras"
                 : isAdmin ? "Reportes" : "Reporte Diario";
 
   // Loading state
@@ -1181,8 +1185,8 @@ export default function App() {
             <div><div className="font-bold tracking-tight">Pago Fácil</div><div className="text-xs text-slate-400">Administración</div></div>
           </div>
           <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-            {[["dashboard", "dashboard", "Resumen"], ["pos", "pos", "Punto de venta"], ["businesses", "business", "Negocios"], ["inventory", "box", "Productos"], ["purchases", "purchase", "Compras"], ["sales", "sales", "Ventas"], ["users", "users", "Empleados"], ["reports", "report", "Reportes"]]
-              .filter(([key]) => activeBusinessId || key === "businesses").map(([key, icon, label]) => (
+            {[["dashboard", "dashboard", "Resumen"], ["pos", "pos", "Punto de venta"], ["businesses", "business", "Negocios"], ["inventory", "box", "Productos"], ["purchases", "purchase", "Compras"], ["sales", "sales", "Ventas"], ["users", "users", "Empleados"], ["reports", "report", "Reportes"], ["plush", "plush", "Pelucheras"]]
+              .filter(([key]) => activeBusinessId || key === "businesses" || key === "plush").map(([key, icon, label]) => (
                 <button key={key} onClick={() => navigateAdmin(key)} className={`admin-nav-item ${view === key ? "active" : ""}`}><Icon name={icon} size={19}/><span>{label}</span></button>
               ))}
           </nav>
@@ -1317,18 +1321,20 @@ export default function App() {
             <div className={`text-xs uppercase tracking-widest ${isAdmin ? "font-bold text-blue-600" : "text-slate-500"}`}>{isAdmin ? "Panel administrativo" : "Panel"}</div>
             <h2 className={`${isAdmin ? "mt-1 text-3xl font-bold tracking-tight" : "text-2xl font-semibold"} text-slate-900`}>{viewTitle}</h2>
           </div>
-          {isAdmin ? <div className="flex items-center gap-3">
+          {isAdmin && view !== "plush" ? <div className="flex items-center gap-3">
             <div className="hidden text-right sm:block"><div className="text-xs font-medium text-slate-500">Negocio activo</div><div className="text-sm font-bold text-slate-900">{activeBusiness?.name || "Sin selección"}</div></div>
             <select className="admin-select max-w-[180px]" value={activeBusinessId} onChange={(e) => switchBusiness(e.target.value)}><option value="">Seleccionar</option>{businesses.filter((business) => business.active).map((business) => <option key={business.id} value={business.id}>{business.name}</option>)}</select>
-          </div> : <div className="text-right">
+          </div> : view !== "plush" ? <div className="text-right">
             <div className="text-xs uppercase tracking-widest text-slate-400">Usuario actual</div>
             <div className="text-sm font-semibold text-slate-800">{user.name || user.email}</div>
             <div className="text-xs text-slate-500">{isAdmin ? "Dueño" : "Cajero"}</div>
             <div className="text-xs font-semibold text-blue-600 mt-1">
               {activeBusiness?.name || "Sin negocio seleccionado"}
             </div>
-          </div>}
+          </div> : <div className="hidden rounded-xl bg-fuchsia-50 px-4 py-2 text-right sm:block"><div className="text-xs font-bold text-fuchsia-600">Portal independiente</div><div className="text-sm font-black">Inventario global</div></div>}
         </div>
+
+        {view === "plush" && isAdmin && <PlushPortal api={api} notify={notify} />}
 
         {view === "dashboard" && isAdmin && activeBusinessId && (
           <div className="mx-auto max-w-7xl space-y-6">

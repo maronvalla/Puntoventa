@@ -14,7 +14,8 @@
     "db:show-owner": "node scripts/show-owner.js",
     "db:reset-owner-password": "node scripts/reset-owner-password.js",
     "db:studio": "prisma studio",
-    "db:migrate:deploy": "prisma migrate deploy"
+    "db:migrate:deploy": "prisma migrate deploy",
+    "test": "node --test"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

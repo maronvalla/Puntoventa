@@ -245,6 +245,75 @@ class ApiService {
   async getTopProduct() {
     return this.request("/reports/top-product");
   }
+
+  // Pelucheras (portal global del dueño, independiente del negocio activo)
+  async getPlushOverview(params = {}) {
+    const query = new URLSearchParams();
+    if (params.period) query.set("period", params.period);
+    if (params.year) query.set("year", String(params.year));
+    if (params.month) query.set("month", String(params.month));
+    return this.request(`/plush/overview?${query.toString()}`);
+  }
+
+  async initializePlushInventory(data) {
+    return this.request("/plush/inventory/initialize", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async adjustPlushInventory(data) {
+    return this.request("/plush/inventory/adjustments", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async voidPlushAdjustment(id, reason) {
+    return this.request(`/plush/inventory/adjustments/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) });
+  }
+
+  async createPlushPurchase(data) {
+    return this.request("/plush/purchases", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async voidPlushPurchase(id, reason) {
+    return this.request(`/plush/purchases/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) });
+  }
+
+  async createPlushMachine(data) {
+    return this.request("/plush/machines", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async updatePlushMachine(id, data) {
+    return this.request(`/plush/machines/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  async addPlushMachinePhoto(machineId, dataUrl, isCover = false) {
+    return this.request(`/plush/machines/${machineId}/photos`, { method: "POST", body: JSON.stringify({ dataUrl, isCover }) });
+  }
+
+  async setPlushMachineCover(machineId, photoId) {
+    return this.request(`/plush/machines/${machineId}/photos/${photoId}/cover`, { method: "PATCH" });
+  }
+
+  async deletePlushMachinePhoto(machineId, photoId) {
+    return this.request(`/plush/machines/${machineId}/photos/${photoId}`, { method: "DELETE" });
+  }
+
+  async createPlushLoad(data) {
+    return this.request("/plush/loads", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async voidPlushLoad(id, reason) {
+    return this.request(`/plush/loads/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) });
+  }
+
+  async createPlushSettlement(data) {
+    return this.request("/plush/settlements", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async updatePlushSettlement(id, data) {
+    return this.request(`/plush/settlements/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  async voidPlushSettlement(id, reason) {
+    return this.request(`/plush/settlements/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) });
+  }
 }
 
 export const api = new ApiService();

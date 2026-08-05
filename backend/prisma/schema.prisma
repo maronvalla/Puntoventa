@@ -45,6 +45,151 @@ model User {
   @@map("users")
 }
 
+model PlushInventory {
+  id              String   @id @default("main")
+  initialQuantity Int
+  initialUnitCost Decimal  @db.Decimal(14, 4)
+  locked          Boolean  @default(false)
+  createdById     String
+  createdByName   String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("plush_inventory")
+}
+
+model PlushMachine {
+  id                     String   @id @default(cuid())
+  name                   String
+  code                   String   @unique
+  location               String
+  model                  String   @default("")
+  serialNumber           String   @default("")
+  notes                  String   @default("")
+  active                 Boolean  @default(true)
+  consignment            Boolean  @default(false)
+  locatorName            String   @default("")
+  locatorPercent         Decimal  @default(0) @db.Decimal(7, 4)
+  initialCounter         Int
+  initialPlushQuantity   Int
+  createdById            String
+  createdByName          String
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  photos      PlushMachinePhoto[]
+  loads       PlushLoad[]
+  settlements PlushSettlement[]
+
+  @@index([active, name])
+  @@map("plush_machines")
+}
+
+model PlushMachinePhoto {
+  id        String       @id @default(cuid())
+  machine   PlushMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machineId String
+  dataUrl   String
+  mimeType  String
+  isCover   Boolean      @default(false)
+  sortOrder Int          @default(0)
+  createdAt DateTime     @default(now())
+
+  @@index([machineId, sortOrder])
+  @@map("plush_machine_photos")
+}
+
+model PlushPurchase {
+  id             String              @id @default(cuid())
+  quantity       Int
+  totalCost      Decimal             @db.Decimal(14, 2)
+  unitCost       Decimal             @db.Decimal(14, 4)
+  supplier       String              @default("")
+  notes          String              @default("")
+  status         PlushMovementStatus @default(ACTIVE)
+  createdById    String
+  createdByName  String
+  voidedById     String?
+  voidedByName   String?
+  voidReason     String?
+  voidedAt       DateTime?
+  createdAt      DateTime            @default(now())
+
+  @@index([status, createdAt])
+  @@map("plush_purchases")
+}
+
+model PlushStockAdjustment {
+  id           String              @id @default(cuid())
+  delta        Int
+  reason       String
+  status       PlushMovementStatus @default(ACTIVE)
+  createdById   String
+  createdByName String
+  voidedById    String?
+  voidedByName  String?
+  voidReason    String?
+  voidedAt      DateTime?
+  createdAt     DateTime            @default(now())
+
+  @@index([status, createdAt])
+  @@map("plush_stock_adjustments")
+}
+
+model PlushLoad {
+  id             String              @id @default(cuid())
+  machine        PlushMachine        @relation(fields: [machineId], references: [id])
+  machineId      String
+  quantity       Int
+  notes          String              @default("")
+  status         PlushMovementStatus @default(ACTIVE)
+  createdById    String
+  createdByName  String
+  voidedById     String?
+  voidedByName   String?
+  voidReason     String?
+  voidedAt       DateTime?
+  createdAt      DateTime            @default(now())
+
+  @@index([machineId, status, createdAt])
+  @@map("plush_loads")
+}
+
+model PlushSettlement {
+  id                     String              @id @default(cuid())
+  machine                PlushMachine        @relation(fields: [machineId], references: [id])
+  machineId              String
+  dayKey                 String
+  initialCounter         Int
+  finalCounter           Int
+  prizesDelivered        Int
+  cashAmount             Decimal             @db.Decimal(14, 2)
+  qrAmount               Decimal             @db.Decimal(14, 2)
+  cppSnapshot            Decimal             @db.Decimal(14, 4)
+  consignmentSnapshot    Boolean
+  locatorNameSnapshot    String               @default("")
+  locatorPercentSnapshot Decimal              @db.Decimal(7, 4)
+  notes                  String               @default("")
+  status                 PlushMovementStatus  @default(ACTIVE)
+  createdById            String
+  createdByName          String
+  voidedById             String?
+  voidedByName           String?
+  voidReason             String?
+  voidedAt               DateTime?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+
+  @@index([machineId, status, createdAt])
+  @@index([dayKey, status])
+  @@map("plush_settlements")
+}
+
+enum PlushMovementStatus {
+  ACTIVE
+  VOIDED
+}
+
 enum Role {
   OWNER
   CASHIER

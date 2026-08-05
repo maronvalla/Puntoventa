@@ -3,6 +3,12 @@ import { test, expect } from "@playwright/test";
 const owner = { id: "owner-1", username: "admin", name: "Alejandro", role: "OWNER" };
 const business = { id: "business-1", name: "Sucursal Centro", address: "San Martín 120", active: true };
 const product = { id: "inventory-1", productId: "product-1", name: "Gaseosa 500 ml", code: "gas-500", barcode: "7790001", price: 1800, costPrice: 1000, stock: 3, criticalStock: 4, active: true };
+const plushMachine = { id: "machine-1", name: "Garra Centro", code: "PEL-01", location: "Shopping Centro", model: "Garra XL", serialNumber: "A-100", notes: "", active: true, consignment: true, locatorName: "Shopping", locatorPercent: 15, initialCounter: 100, initialPlushQuantity: 30, theoreticalStock: 22, auditAlert: false, photos: [] };
+const plushOverview = {
+  inventory: { initialized: true, initialQuantity: 100, initialUnitCost: 500, locked: true, purchased: 50, adjusted: 0, loaded: 40, remaining: 110 },
+  machines: [plushMachine], purchases: [], adjustments: [], loads: [], settlements: [],
+  dashboard: { period: "month", from: "2026-08-01", to: "2026-08-31", grossIncome: 12000, cashAmount: 7000, qrAmount: 5000, prizesDelivered: 8, prizeCost: 4000, locatorAmount: 1800, netProfit: 6200, weightedCpp: 500, ipp: 1500, gpp: 1000, netProfitPerPlush: 775, negativeMachines: 0, ranking: [{ machineId: plushMachine.id, machineName: plushMachine.name, prizesDelivered: 8, grossIncome: 12000, netProfit: 6200 }] },
+};
 
 async function mockApi(page) {
   await page.addInitScript(() => localStorage.setItem("token", "test-token"));
@@ -16,6 +22,7 @@ async function mockApi(page) {
       : path === "/sales" ? [{ id: "sale-1", sellerName: "María", total: 3500, status: "ACTIVE", cashAmount: 3500, transferAmount: 0, createdAt: new Date().toISOString(), items: [{ qty: 1, itemCostPrice: 1000 }] }]
       : path === "/reports/summary" ? { period: "month", year: 2026, month: 7, grossSales: 3500, cogs: 1000, profit: 2500, marginPercent: 71.4, transactions: 1, averageTicket: 3500, paymentTotals: { cash: 3500, transfer: 0 }, trend: [{ key: 1, label: "1", grossSales: 3500, profit: 2500, transactions: 1 }], topProduct: { name: product.name, qty: 1, revenue: 3500 }, topProducts: [{ name: product.name, qty: 1, revenue: 3500 }] }
       : path === "/reports/top-product" ? { name: product.name, qty: 4 }
+      : path === "/plush/overview" ? plushOverview
       : {};
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   });
@@ -53,4 +60,37 @@ test("reportes conserva diario y agrega mensual y anual", async ({ page }) => {
   await expect(page.getByText("Producto estrella")).toBeVisible();
   await page.getByRole("button", { name: "Diario", exact: true }).click();
   await expect(page.getByText("Ventas por empleado")).toBeVisible();
+});
+
+test("el portal de pelucheras está separado del negocio POS", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Pelucheras", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Control de pelucheras" })).toBeVisible();
+  await expect(page.getByText("110 peluches")).toBeVisible();
+  await expect(page.getByText("Garra Centro")).toBeVisible();
+  await page.getByRole("button", { name: "Máquinas", exact: true }).click();
+  await page.getByText("Garra Centro").click();
+  await expect(page.getByText("Shopping Centro")).toBeVisible();
+  await expect(page.getByText("Saldo interno")).toBeVisible();
+  await expect(page.getByText("22", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Cargar peluches" }).click();
+  await page.getByLabel("Cantidad").fill("5");
+  await page.getByRole("button", { name: "Guardar" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await page.getByRole("button", { name: "Nueva liquidación" }).click();
+  await page.getByLabel("Lectura final").fill("110");
+  await page.getByLabel("Efectivo").fill("1000");
+  await page.getByLabel("QR").fill("500");
+  await page.getByRole("button", { name: "Guardar liquidación" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await page.getByRole("button", { name: "Inventario", exact: true }).click();
+  await page.getByRole("button", { name: "+ Registrar compra" }).click();
+  await page.getByLabel("Cantidad").fill("10");
+  await page.getByLabel("Importe total").fill("5000");
+  await page.getByRole("button", { name: "Guardar" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
 });
