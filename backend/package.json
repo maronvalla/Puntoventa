@@ -15,7 +15,7 @@
     "db:reset-owner-password": "node scripts/reset-owner-password.js",
     "db:studio": "prisma studio",
     "db:migrate:deploy": "prisma migrate deploy",
-    "test": "node --test"
+    "test": "node --test test/plush-rules.test.js ../supabase/functions/api/routing.test.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

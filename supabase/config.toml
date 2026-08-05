@@ -1,0 +1,6 @@
+project_id = "pos-pagofa"
+
+[functions.api]
+# La API conserva temporalmente los JWT actuales del POS. La función valida
+# esos tokens internamente hasta completar la migración a Supabase Auth.
+verify_jwt = false

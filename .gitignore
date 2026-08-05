@@ -51,6 +51,7 @@ tmp/
 .firebase/
 .dataconnect/
 .yarn-integrity
+supabase/.temp/
 
 # Optional historical entries
 lib-cov/
