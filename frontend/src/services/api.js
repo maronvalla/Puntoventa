@@ -299,10 +299,6 @@ class ApiService {
     return this.request("/plush/loads", { method: "POST", body: JSON.stringify(data) });
   }
 
-  async createPlushPass(data) {
-    return this.request("/plush/passes", { method: "POST", body: JSON.stringify(data) });
-  }
-
   async voidPlushLoad(id, reason) {
     return this.request(`/plush/loads/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) });
   }
