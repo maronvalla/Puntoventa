@@ -8,6 +8,7 @@ import {
   parseAllowedOrigins,
   routeFromRequest,
 } from "./routing.js";
+import { stockAdjustmentError } from "./stock-rules.js";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -604,17 +605,37 @@ async function handleRequest(request: Request, headers: Record<string, string>) 
 
     const adjustmentMatch = route.match(/^\/products\/([^/]+)\/adjust-stock$/);
     if (request.method === "POST" && adjustmentMatch) {
-      const ownerError = requireOwner(auth.user, headers);
-      if (ownerError) return ownerError;
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       const delta = Number(body.delta);
       const reason = String(body.reason || "").trim();
-      if (!Number.isInteger(delta) || delta === 0) return json({ error: "Delta inválido" }, 400, headers);
       if (!reason) return json({ error: "Motivo requerido" }, 400, headers);
+
+      const productId = decodeURIComponent(adjustmentMatch[1]);
+      const product = await fetchBusinessProduct(productId, businessId);
+      if (!product) return json({ error: "Producto no encontrado" }, 404, headers);
+      const validationError = stockAdjustmentError({
+        role: auth.user.role,
+        costPrice: product.costPrice,
+        delta,
+      });
+      if (validationError) return json({ error: validationError }, 400, headers);
+
+      if (auth.user.role === "CASHIER") {
+        const employeeResult = await db.rpc("pos_employee_add_stock", {
+          p_business_id: businessId,
+          p_business_product_id: productId,
+          p_quantity: delta,
+          p_reason: reason,
+          p_employee_id: auth.user.id,
+          p_employee_name: auth.user.name,
+        });
+        if (employeeResult.error) return json({ error: employeeResult.error.message }, 400, headers);
+        return json(await fetchBusinessProduct(String(employeeResult.data), businessId), 200, headers);
+      }
 
       const result = await db.rpc("pos_adjust_stock", {
         p_business_id: businessId,
-        p_business_product_id: decodeURIComponent(adjustmentMatch[1]),
+        p_business_product_id: productId,
         p_delta: delta,
         p_reason: reason,
         p_admin_id: auth.user.id,

@@ -3,6 +3,7 @@ import { test, expect } from "@playwright/test";
 const owner = { id: "owner-1", username: "admin", name: "Alejandro", role: "OWNER" };
 const business = { id: "business-1", name: "Sucursal Centro", address: "San Martín 120", active: true };
 const product = { id: "inventory-1", productId: "product-1", name: "Gaseosa 500 ml", code: "gas-500", barcode: "7790001", price: 1800, costPrice: 1000, stock: 3, criticalStock: 4, active: true };
+const cashier = { id: "cashier-1", username: "caja1", name: "María", role: "CASHIER", businessId: business.id, business };
 const plushMachine = { id: "machine-1", name: "Garra Centro", code: "PEL-01", location: "Shopping Centro", model: "Garra XL", serialNumber: "A-100", notes: "", active: true, consignment: true, locatorName: "Shopping", locatorPercent: 15, initialCounter: 100, initialPlushQuantity: 30, theoreticalStock: 22, auditAlert: false, photos: [] };
 const plushOverview = {
   inventory: { initialized: true, initialQuantity: 100, initialUnitCost: 500, locked: true, purchased: 50, adjusted: 0, loaded: 40, remaining: 110 },
@@ -10,13 +11,13 @@ const plushOverview = {
   dashboard: { period: "month", from: "2026-08-01", to: "2026-08-31", grossIncome: 12000, cashAmount: 7000, qrAmount: 5000, prizesDelivered: 8, prizeCost: 4000, locatorAmount: 1800, netProfit: 6200, weightedCpp: 500, ipp: 1500, gpp: 1000, netProfitPerPlush: 775, negativeMachines: 0, ranking: [{ machineId: plushMachine.id, machineName: plushMachine.name, prizesDelivered: 8, grossIncome: 12000, netProfit: 6200 }] },
 };
 
-async function mockApi(page) {
+async function mockApi(page, { currentUser = owner, currentProduct = product } = {}) {
   await page.addInitScript(() => localStorage.setItem("token", "test-token"));
   await page.route("http://api.test/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    const body = path === "/auth/me" ? { user: owner }
+    const body = path === "/auth/me" ? { user: currentUser }
       : path === "/businesses" ? [business]
-      : path === "/products" ? [product]
+      : path === "/products" ? [currentProduct]
       : path === "/users" ? [{ id: "user-1", username: "caja1", name: "María", role: "CASHIER", active: true, businessId: business.id }]
       : path === "/catalog" ? [{ id: product.productId, name: product.name, code: product.code, barcode: product.barcode, active: true }]
       : path === "/sales" ? [{ id: "sale-1", sellerName: "María", total: 3500, status: "ACTIVE", cashAmount: 3500, transferAmount: 0, createdAt: new Date().toISOString(), items: [{ qty: 1, itemCostPrice: 1000 }] }]
@@ -27,6 +28,26 @@ async function mockApi(page) {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   });
 }
+
+test("el empleado suma stock únicamente desde el portal habilitado", async ({ page }) => {
+  const zeroCostProduct = { ...product, costPrice: 0 };
+  await mockApi(page, { currentUser: cashier, currentProduct: zeroCostProduct });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Cargar stock", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Cargar stock" })).toBeVisible();
+  await expect(page.getByText("Gaseosa 500 ml")).toBeVisible();
+
+  const adjustmentRequest = page.waitForRequest((request) =>
+    request.url().endsWith("/products/inventory-1/adjust-stock") && request.method() === "POST"
+  );
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByLabel("Unidades a sumar").fill("6");
+  await page.getByRole("button", { name: "Sumar", exact: true }).click();
+
+  const request = await adjustmentRequest;
+  expect(request.postDataJSON()).toEqual({ delta: 6, reason: "Carga desde portal de empleado" });
+});
 
 test("el dueño inicia en el resumen y gestiona productos con panel lateral", async ({ page }) => {
   await mockApi(page);

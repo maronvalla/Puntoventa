@@ -131,16 +131,22 @@ router.patch("/:id", authenticate, requireOwner, requireBusiness, async (req, re
   }
 });
 
-router.post("/:id/adjust-stock", authenticate, requireOwner, requireBusiness, async (req, res) => {
+router.post("/:id/adjust-stock", authenticate, requireBusiness, async (req, res) => {
   try {
     const delta = Number(req.body.delta);
     const reason = String(req.body.reason || "").trim();
-    if (!Number.isFinite(delta) || delta === 0) return res.status(400).json({ error: "Delta inválido" });
+    if (!Number.isInteger(delta) || delta === 0) return res.status(400).json({ error: "Delta inválido" });
     if (!reason) return res.status(400).json({ error: "Motivo requerido" });
 
     const result = await prisma.$transaction(async (tx) => {
       const existing = await tx.businessProduct.findFirst({ where: { id: req.params.id, businessId: req.businessId } });
       if (!existing) throw new Error("Producto no encontrado");
+      if (req.user.role === "CASHIER" && delta < 1) {
+        throw new Error("Los empleados sólo pueden sumar stock");
+      }
+      if (req.user.role === "CASHIER" && Number(existing.costPrice) !== 0) {
+        throw new Error("Los empleados sólo pueden cargar stock en productos de costo cero");
+      }
       const item = await tx.businessProduct.update({
         where: { id: existing.id }, data: { stock: { increment: delta } }, include: { product: true },
       });
