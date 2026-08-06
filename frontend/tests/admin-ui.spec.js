@@ -101,12 +101,41 @@ test("el portal de pelucheras está separado del negocio POS", async ({ page }) 
   await page.getByRole("button", { name: "Guardar" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
 
-  await page.getByRole("button", { name: "Nueva liquidación" }).click();
-  await page.getByLabel("Lectura final").fill("110");
-  await page.getByLabel("Efectivo").fill("1000");
+  const passWithoutLoadRequest = page.waitForRequest((request) =>
+    request.url().endsWith("/plush/passes") && request.method() === "POST"
+  );
+  await page.getByRole("button", { name: "Registrar pasada" }).click();
+  await page.getByLabel("Lectura actual").fill("110");
+  await page.getByLabel("Dinero retirado").fill("1000");
   await page.getByLabel("QR").fill("500");
-  await page.getByRole("button", { name: "Guardar liquidación" }).click();
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await expect(page.getByText("10", { exact: true })).toBeVisible();
+  await expect(page.getByText("12", { exact: true })).toBeVisible();
+  await page.getByText("No cargar", { exact: true }).click();
+  await expect(page.getByText("12 peluches", { exact: true })).toHaveCount(2);
+  await expect(page.getByRole("dialog").getByText("110 peluches", { exact: true })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Registrar pasada" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
+  expect((await passWithoutLoadRequest).postDataJSON()).toEqual({
+    machineId: "machine-1", finalCounter: 110, cashAmount: 1000, qrAmount: 500, notes: "", loadQuantity: 0,
+  });
+
+  const passWithLoadRequest = page.waitForRequest((request) =>
+    request.url().endsWith("/plush/passes") && request.method() === "POST"
+  );
+  await page.getByRole("button", { name: "Registrar pasada" }).click();
+  await page.getByLabel("Lectura actual").fill("110");
+  await page.getByLabel("Dinero retirado").fill("2000");
+  await page.getByLabel("QR").fill("0");
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await page.getByText("Sí, cargar", { exact: true }).click();
+  await page.getByLabel("Cantidad a cargar").fill("5");
+  await expect(page.getByText("17 peluches", { exact: true })).toBeVisible();
+  await expect(page.getByText("105 peluches", { exact: true })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Registrar pasada" }).click();
+  expect((await passWithLoadRequest).postDataJSON()).toEqual({
+    machineId: "machine-1", finalCounter: 110, cashAmount: 2000, qrAmount: 0, notes: "", loadQuantity: 5,
+  });
 
   await page.getByRole("button", { name: "Inventario", exact: true }).click();
   await page.getByRole("button", { name: "+ Registrar compra" }).click();
@@ -114,4 +143,43 @@ test("el portal de pelucheras está separado del negocio POS", async ({ page }) 
   await page.getByLabel("Importe total").fill("5000");
   await page.getByRole("button", { name: "Guardar" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
+});
+
+test("registrar pasada bloquea contadores, importes y cargas inválidas", async ({ page }) => {
+  await mockApi(page);
+  let passRequests = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/plush/passes")) passRequests += 1;
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Pelucheras", exact: true }).click();
+  await page.getByRole("button", { name: "Máquinas", exact: true }).click();
+  await page.getByText("Garra Centro").click();
+  await page.getByRole("button", { name: "Registrar pasada" }).click();
+
+  await page.getByLabel("Lectura actual").fill("99");
+  await page.getByLabel("Dinero retirado").fill("1000");
+  await page.getByLabel("QR").fill("0");
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await expect(page.getByRole("dialog", { name: /Paso 1 de 2/ })).toBeVisible();
+
+  await page.getByLabel("Lectura actual").fill("100.5");
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await expect(page.getByRole("dialog", { name: /Paso 1 de 2/ })).toBeVisible();
+
+  await page.getByLabel("Lectura actual").fill("110");
+  await page.getByLabel("Dinero retirado").fill("-1");
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await expect(page.getByRole("dialog", { name: /Paso 1 de 2/ })).toBeVisible();
+
+  await page.getByLabel("Dinero retirado").fill("1000");
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await page.getByText("Sí, cargar", { exact: true }).click();
+  await page.getByLabel("Cantidad a cargar").fill("0");
+  await page.getByRole("dialog").getByRole("button", { name: "Registrar pasada" }).click();
+  await expect(page.getByRole("dialog", { name: /Paso 2 de 2/ })).toBeVisible();
+  await page.getByLabel("Cantidad a cargar").fill("111");
+  await page.getByRole("dialog").getByRole("button", { name: "Registrar pasada" }).click();
+  await expect(page.getByRole("dialog", { name: /Paso 2 de 2/ })).toBeVisible();
+  expect(passRequests).toBe(0);
 });

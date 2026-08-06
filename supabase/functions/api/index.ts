@@ -1226,6 +1226,19 @@ async function handleRequest(request: Request, headers: Record<string, string>) 
       if(request.method==="POST"&&route==="/plush/purchases"){const quantity=safeInteger(body.quantity,"Cantidad",false),totalCost=safeMoney(body.totalCost,"Importe total");const id=await rpcId("pos_plush_purchase",{p_quantity:quantity,p_total_cost:totalCost,p_supplier:cleanText(body.supplier),p_notes:cleanText(body.notes),...actorArgs});const result=await db.from("plush_purchases").select("*").eq("id",id).single();return json({...result.data,totalCost:Number(result.data.totalCost),unitCost:Number(result.data.unitCost)},201,headers);}
       match=route.match(/^\/plush\/purchases\/([^/]+)\/void$/);
       if(request.method==="POST"&&match){const reason=cleanText(body.reason);if(!reason)throw new Error("El motivo es obligatorio");const id=await rpcId("pos_plush_void_purchase",{p_id:decodeURIComponent(match[1]),p_reason:reason,...actorArgs});const result=await db.from("plush_purchases").select("*").eq("id",id).single();return json({...result.data,totalCost:Number(result.data.totalCost),unitCost:Number(result.data.unitCost)},200,headers);}
+      if(request.method==="POST"&&route==="/plush/passes"){
+        const loadQuantity=body.loadQuantity==null||body.loadQuantity===""?0:safeInteger(body.loadQuantity,"Cantidad a cargar");
+        const rpcResult=await db.rpc("pos_plush_pass",{p_machine_id:String(body.machineId||""),p_final_counter:safeInteger(body.finalCounter,"Lectura actual"),p_cash:safeMoney(body.cashAmount||0,"Dinero retirado"),p_qr:safeMoney(body.qrAmount||0,"QR"),p_notes:cleanText(body.notes),p_load_quantity:loadQuantity,p_day_key:dayKeyArgentina(),...actorArgs});
+        if(rpcResult.error)throw new Error(rpcResult.error.message);
+        const ids=rpcResult.data as {settlementId:string;loadId:string|null};
+        const [settlementResult,loadResult]=await Promise.all([
+          db.from("plush_settlements").select("*").eq("id",ids.settlementId).single(),
+          ids.loadId?db.from("plush_loads").select("*").eq("id",ids.loadId).single():Promise.resolve({data:null,error:null}),
+        ]);
+        if(settlementResult.error)throw settlementResult.error;
+        if(loadResult.error)throw loadResult.error;
+        return json({settlement:serializePlushSettlement(settlementResult.data),load:loadResult.data},201,headers);
+      }
       if(request.method==="POST"&&route==="/plush/loads"){const id=await rpcId("pos_plush_load",{p_machine_id:String(body.machineId||""),p_quantity:safeInteger(body.quantity,"Cantidad",false),p_notes:cleanText(body.notes),...actorArgs});const result=await db.from("plush_loads").select("*").eq("id",id).single();return json(result.data,201,headers);}
       match=route.match(/^\/plush\/loads\/([^/]+)\/void$/);
       if(request.method==="POST"&&match){const reason=cleanText(body.reason);if(!reason)throw new Error("El motivo es obligatorio");const id=await rpcId("pos_plush_void_load",{p_id:decodeURIComponent(match[1]),p_reason:reason,...actorArgs});const result=await db.from("plush_loads").select("*").eq("id",id).single();return json(result.data,200,headers);}

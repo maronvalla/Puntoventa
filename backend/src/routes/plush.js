@@ -291,6 +291,44 @@ router.post("/loads", async (req, res) => {
   } catch (error) { res.status(400).json({ error: error.message || "No se pudo registrar la carga" }); }
 });
 
+router.post("/passes", async (req, res) => {
+  try {
+    const loadQuantity = req.body.loadQuantity == null || req.body.loadQuantity === ""
+      ? 0
+      : integer(req.body.loadQuantity, "Cantidad a cargar");
+    const created = await prisma.$transaction(async (tx) => {
+      const inventory = await lockInventory(tx);
+      const machine = await tx.plushMachine.findUnique({ where: { id: String(req.body.machineId || "") } });
+      if (!machine?.active) throw new Error("Seleccioná una máquina activa");
+      const previous = await tx.plushSettlement.findFirst({ where: { machineId: machine.id, status: "ACTIVE" }, orderBy: { createdAt: "desc" } });
+      const initialCounter = previous ? previous.finalCounter : machine.initialCounter;
+      const finalCounter = integer(req.body.finalCounter, "Lectura actual");
+      if (finalCounter < initialCounter) throw new Error(`La lectura no puede ser menor que ${initialCounter}`);
+      const lastPurchase = await tx.plushPurchase.findFirst({ where: { status: "ACTIVE", createdAt: { lte: new Date() } }, orderBy: { createdAt: "desc" } });
+
+      if (loadQuantity > 0) {
+        const state = await inventoryState(tx);
+        if (loadQuantity > state.remaining) throw new Error(`Stock insuficiente: quedan ${state.remaining} peluches`);
+      }
+
+      const settlement = await tx.plushSettlement.create({ data: {
+        machineId: machine.id, dayKey: dayKeyArgentina(), initialCounter, finalCounter,
+        prizesDelivered: finalCounter - initialCounter,
+        cashAmount: money(req.body.cashAmount || 0, "Dinero retirado"), qrAmount: money(req.body.qrAmount || 0, "QR"),
+        cppSnapshot: lastPurchase ? lastPurchase.unitCost : inventory.initialUnitCost,
+        consignmentSnapshot: machine.consignment, locatorNameSnapshot: machine.consignment ? machine.locatorName : "",
+        locatorPercentSnapshot: machine.consignment ? machine.locatorPercent : 0,
+        notes: text(req.body.notes), ...actor(req),
+      } });
+      const load = loadQuantity > 0
+        ? await tx.plushLoad.create({ data: { machineId: machine.id, quantity: loadQuantity, notes: "Carga realizada al registrar pasada", ...actor(req) } })
+        : null;
+      return { settlement, load };
+    }, { isolationLevel: "Serializable" });
+    res.status(201).json({ settlement: serializeSettlement(created.settlement), load: created.load });
+  } catch (error) { res.status(400).json({ error: error.message || "No se pudo registrar la pasada" }); }
+});
+
 router.post("/loads/:id/void", async (req, res) => {
   try {
     const reason = text(req.body.reason);
